@@ -1,0 +1,24 @@
+# Documentation for pyproject.toml: https://packaging.python.org/en/latest/guides/writing-pyproject-toml/
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+# name and version are mandatory, you can change the values but do not delete them.
+[project]
+name = "comp0035-cw1-YOURGROUPNUMBER" # Replace YOURGROUPNUMBER with your Moodle 'group' number
+version = "2025.1"
+description = "COMP0035 Coursework 1 using DATASET NAME"  # Replace DATASET NAME with the name of your dataset
+readme = "README.md"
+dependencies = [
+    "pandas",
+    "matplotlib"]
+
+# Setuptools configuration see https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html#setuptools-specific-configuration
+# Not strictly required as default 'src' is automatically recognised by setuptools
+[tool.setuptools]
+package-dir = { "" = "src" } # tells setuptools that the root of the packages is in src/.
+
+[tool.setuptools.packages.find]
+where = ["src"] # tells setuptools to go and look inside src/ to find packages.
+
+# You should add anything else that is needed for coursework1
