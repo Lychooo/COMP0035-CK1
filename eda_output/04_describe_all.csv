@@ -1,0 +1,13 @@
+,count,unique,top,freq,mean,std,min,25%,50%,75%,max
+year,1401.0,,,,2018.3411848679514,3.0555469037145264,2013.0,2016.0,2018.0,2021.0,2023.0
+university,1401,6,Nanyang Technological University,438,,,,,,,
+school,1401,74,College of Engineering,178,,,,,,,
+degree,1401,418,Economics,19,,,,,,,
+employment_rate_overall,1401,316,100,137,,,,,,,
+employment_rate_ft_perm,1401,499,na,92,,,,,,,
+basic_monthly_mean,1401,994,na,92,,,,,,,
+basic_monthly_median,1401,229,3000,142,,,,,,,
+gross_monthly_mean,1401,984,na,92,,,,,,,
+gross_monthly_median,1401,305,3500,107,,,,,,,
+gross_mthly_25_percentile,1401,230,3000,189,,,,,,,
+gross_mthly_75_percentile,1401,349,3500,99,,,,,,,

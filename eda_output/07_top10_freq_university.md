@@ -1,0 +1,8 @@
+| university                                    |   count |
+|:----------------------------------------------|--------:|
+| Nanyang Technological University              |     438 |
+| National University of Singapore              |     438 |
+| Singapore Institute of Technology             |     318 |
+| Singapore Management University               |     134 |
+| Singapore University of Social Sciences       |      41 |
+| Singapore University of Technology and Design |      32 |

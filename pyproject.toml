@@ -1,24 +1,34 @@
-# Documentation for pyproject.toml: https://packaging.python.org/en/latest/guides/writing-pyproject-toml/
+# Documentation: https://packaging.python.org/en/latest/guides/writing-pyproject-toml/
+
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
-# name and version are mandatory, you can change the values but do not delete them.
+# >>> 修改成你的信息
 [project]
-name = "comp0035-cw1-YOURGROUPNUMBER" # Replace YOURGROUPNUMBER with your Moodle 'group' number
+name = "comp0035-cw1-GROUP_XX"         # ← 把 GROUP_XX 改成你的 Moodle 组号
 version = "2025.1"
-description = "COMP0035 Coursework 1 using DATASET NAME"  # Replace DATASET NAME with the name of your dataset
+description = "COMP0035 Coursework 1 using Graduate Employment Survey (SG)"
 readme = "README.md"
-dependencies = [
-    "pandas",
-    "matplotlib"]
 
-# Setuptools configuration see https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html#setuptools-specific-configuration
-# Not strictly required as default 'src' is automatically recognised by setuptools
+# 这里列出运行代码需要安装的包
+dependencies = [
+  "pandas>=2.2,<3.0",
+  "matplotlib>=3.8,<4.0",
+  "SQLAlchemy>=2.0,<3.0",
+  "tabulate>=0.9"
+]
+
+# （可选，但推荐）声明支持的 Python 版本
+requires-python = ">=3.10"
+
+# 让 setuptools 知道源码在 src/ 目录
 [tool.setuptools]
-package-dir = { "" = "src" } # tells setuptools that the root of the packages is in src/.
+package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
-where = ["src"] # tells setuptools to go and look inside src/ to find packages.
+where = ["src"]
 
-# You should add anything else that is needed for coursework1
+# 你可以在这里继续添加其它工具配置（例如 Ruff/Black），按需要添加：
+# [tool.ruff]
+# line-length = 100

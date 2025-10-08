@@ -1,0 +1,12 @@
+| degree                               |   count |
+|:-------------------------------------|--------:|
+| Economics                            |      19 |
+| Accountancy                          |      16 |
+| Bachelor of Dental Surgery           |      11 |
+| Bachelor of Science (Nursing) (Hons) |      11 |
+| Bachelor of Social Sciences          |      11 |
+| Bachelor of Science (Real Estate)    |      11 |
+| Bachelor of Arts (Hons)              |      11 |
+| Bachelor of Arts                     |      11 |
+| Bachelor of Science (Nursing)        |      11 |
+| Computer Science                     |      11 |
