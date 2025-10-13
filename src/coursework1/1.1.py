@@ -43,15 +43,21 @@ def box_by(df: pd.DataFrame, col: str, by_col: str, title: str, ylabel: str) -> 
     if col in df.columns and by_col in df.columns:
         ax = df.boxplot(column=col, by=by_col, rot=45)
         plt.title(title)
-        plt.suptitle("")
+        plt.suptitle("")  # 移除自动子标题
         plt.ylabel(ylabel)
-        plt.tight_layout()
-        plt.savefig(OUTPUT_DIR / f"box_{col}_by_{by_col}.png", dpi=150)
-        plt.close()
+        fig = ax.get_figure()  # ✅ 通过 ax 拿到 figure 对象
+        fig.tight_layout()
+        fig.savefig(OUTPUT_DIR / f"box_{col}_by_{by_col}.png", dpi=150)
+        plt.close(fig)  # ✅ 只关闭这张图
 
 
-def trend_over_time(df: pd.DataFrame, y_col: str, x_col: str = "year",
-                    agg: str = "median", title_prefix: str = "Median") -> None:
+def trend_over_time(
+    df: pd.DataFrame,
+    y_col: str,
+    x_col: str = "year",
+    agg: str = "median",
+    title_prefix: str = "Median",
+) -> None:
     """Plot a trend line of y_col vs. year (aggregated by median or mean)."""
     if x_col not in df.columns or y_col not in df.columns:
         return
@@ -107,13 +113,22 @@ def main() -> None:
     save_table(pd.DataFrame({"dtype": dtypes}), "01_dtypes")
 
     # ---- 3) Missing & duplicates ----
-    save_table(df.isnull().sum().sort_values(ascending=False).to_frame("missing_count"), "02_missing_by_column")
-    save_table(pd.DataFrame({"duplicated_rows": [df.duplicated().sum()]}), "02b_duplicated_rows")
+    save_table(
+        df.isnull().sum().sort_values(ascending=False).to_frame("missing_count"),
+        "02_missing_by_column",
+    )
+    save_table(
+        pd.DataFrame({"duplicated_rows": [df.duplicated().sum()]}),
+        "02b_duplicated_rows",
+    )
 
     # ---- 4) Descriptive statistics ----
     save_table(df.describe().transpose(), "03_describe_numeric")
     save_table(df.describe(include="all").transpose(), "04_describe_all")
-    save_table(df.nunique().sort_values(ascending=False).to_frame("nunique"), "05_nunique_by_column")
+    save_table(
+        df.nunique().sort_values(ascending=False).to_frame("nunique"),
+        "05_nunique_by_column",
+    )
 
     # ---- 5) Convert likely numeric columns ----
     likely_numeric = [
@@ -128,31 +143,73 @@ def main() -> None:
     df_num = coerce_numeric(df, likely_numeric)
 
     # ---- 6) Distributions ----
-    hist(df_num, "employment_rate_overall", "Overall Employment Rate Distribution", "Employment Rate (%)")
-    hist(df_num, "employment_rate_ft_perm", "Full-time Permanent Employment Rate Distribution", "Employment Rate (%)")
-    hist(df_num, "basic_monthly_mean", "Basic Monthly Mean Salary Distribution", "Salary (SGD)")
-    hist(df_num, "gross_monthly_mean", "Gross Monthly Mean Salary Distribution", "Salary (SGD)")
+    hist(
+        df_num,
+        "employment_rate_overall",
+        "Overall Employment Rate Distribution",
+        "Employment Rate (%)",
+    )
+    hist(
+        df_num,
+        "employment_rate_ft_perm",
+        "Full-time Permanent Employment Rate Distribution",
+        "Employment Rate (%)",
+    )
+    hist(
+        df_num,
+        "basic_monthly_mean",
+        "Basic Monthly Mean Salary Distribution",
+        "Salary (SGD)",
+    )
+    hist(
+        df_num,
+        "gross_monthly_mean",
+        "Gross Monthly Mean Salary Distribution",
+        "Salary (SGD)",
+    )
 
     # ---- 7) Boxplots by University ----
-    box_by(df_num, "employment_rate_overall", "university", "Overall Employment Rate by University", "Employment Rate (%)")
-    box_by(df_num, "basic_monthly_mean", "university", "Basic Monthly Mean Salary by University", "Salary (SGD)")
+    box_by(
+        df_num,
+        "employment_rate_overall",
+        "university",
+        "Overall Employment Rate by University",
+        "Employment Rate (%)",
+    )
+    box_by(
+        df_num,
+        "basic_monthly_mean",
+        "university",
+        "Basic Monthly Mean Salary by University",
+        "Salary (SGD)",
+    )
 
     # ---- 8) Trend (Line) Charts ----
-    trend_over_time(df_num, "gross_monthly_median", "year", agg="median", title_prefix="Median")
-    trend_over_time(df_num, "basic_monthly_median", "year", agg="median", title_prefix="Median")
-    trend_over_time(df_num, "employment_rate_overall", "year", agg="median", title_prefix="Median")
+    trend_over_time(
+        df_num, "gross_monthly_median", "year", agg="median", title_prefix="Median"
+    )
+    trend_over_time(
+        df_num, "basic_monthly_median", "year", agg="median", title_prefix="Median"
+    )
+    trend_over_time(
+        df_num, "employment_rate_overall", "year", agg="median", title_prefix="Median"
+    )
 
     # ---- 9) Simple anomaly checks ----
     anomalies = {}
     if "employment_rate_overall" in df_num.columns:
         anomalies["employment_rate_overall_out_of_range"] = df_num[
-            (df_num["employment_rate_overall"] < 0) | (df_num["employment_rate_overall"] > 100)
+            (df_num["employment_rate_overall"] < 0)
+            | (df_num["employment_rate_overall"] > 100)
         ]
     if "employment_rate_ft_perm" in df_num.columns:
         anomalies["employment_rate_ft_perm_out_of_range"] = df_num[
-            (df_num["employment_rate_ft_perm"] < 0) | (df_num["employment_rate_ft_perm"] > 100)
+            (df_num["employment_rate_ft_perm"] < 0)
+            | (df_num["employment_rate_ft_perm"] > 100)
         ]
-    bad_salary_cols = [c for c in ["basic_monthly_mean", "gross_monthly_mean"] if c in df_num.columns]
+    bad_salary_cols = [
+        c for c in ["basic_monthly_mean", "gross_monthly_mean"] if c in df_num.columns
+    ]
     if bad_salary_cols:
         anomalies["salary_negative"] = df_num[(df_num[bad_salary_cols] < 0).any(axis=1)]
 
@@ -170,9 +227,10 @@ def main() -> None:
     print("✅ Section 1.1 EDA completed.")
     print(f"   - Input : {file_path}")
     print(f"   - Output: {OUTPUT_DIR.resolve()}")
-    print("   - Saved: overview/dtypes/missing/duplicates/describe/nunique/hist/box/trend/anomalies/top10-freq")
+    print(
+        "   - Saved: overview/dtypes/missing/duplicates/describe/nunique/hist/box/trend/anomalies/top10-freq"
+    )
 
 
 if __name__ == "__main__":
     main()
-    

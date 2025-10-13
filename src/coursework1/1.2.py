@@ -9,6 +9,7 @@ DEFAULT_FILE_PATH = r"C:/Users/30769/Desktop/comp0035-cw-Lychooo/7-GraduateEmplo
 OUTPUT_DIR = Path("./prep_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+
 # ============== Utilities ==============
 def save_table(df: pd.DataFrame, name: str) -> None:
     """Save a table to CSV and Markdown for easy inclusion in the report."""
@@ -16,8 +17,10 @@ def save_table(df: pd.DataFrame, name: str) -> None:
     with open(OUTPUT_DIR / f"{name}.md", "w", encoding="utf-8") as f:
         f.write(df.to_markdown())
 
+
 def to_num(s: pd.Series) -> pd.Series:
     return pd.to_numeric(s, errors="coerce")
+
 
 def clean_base(df: pd.DataFrame) -> pd.DataFrame:
     """Basic cleaning shared by all questions."""
@@ -42,15 +45,27 @@ def clean_base(df: pd.DataFrame) -> pd.DataFrame:
 
     # Remove impossible percentages and negative salaries (data quality from 1.1)
     if "employment_rate_overall" in out.columns:
-        out = out[(out["employment_rate_overall"] >= 0) & (out["employment_rate_overall"] <= 100)]
+        out = out[
+            (out["employment_rate_overall"] >= 0)
+            & (out["employment_rate_overall"] <= 100)
+        ]
     if "employment_rate_ft_perm" in out.columns:
-        out = out[(out["employment_rate_ft_perm"] >= 0) & (out["employment_rate_ft_perm"] <= 100)]
+        out = out[
+            (out["employment_rate_ft_perm"] >= 0)
+            & (out["employment_rate_ft_perm"] <= 100)
+        ]
 
-    for sc in ["basic_monthly_mean", "basic_monthly_median", "gross_monthly_mean", "gross_monthly_median"]:
+    for sc in [
+        "basic_monthly_mean",
+        "basic_monthly_median",
+        "gross_monthly_mean",
+        "gross_monthly_median",
+    ]:
         if sc in out.columns:
             out = out[out[sc].isna() | (out[sc] >= 0)]
 
     return out
+
 
 def latest_year(df: pd.DataFrame) -> int | None:
     if "year" not in df.columns:
@@ -58,9 +73,11 @@ def latest_year(df: pd.DataFrame) -> int | None:
     yrs = pd.to_numeric(df["year"], errors="coerce").dropna().astype(int)
     return int(yrs.max()) if not yrs.empty else None
 
+
 def ensure_not_empty(df: pd.DataFrame, label: str) -> None:
     if df is None or df.empty:
         raise ValueError(f"No data available for {label} after cleaning/selection.")
+
 
 # ============== Q1: Latest year, university ranking (bar plots) ==============
 def q1_prepare(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
@@ -79,15 +96,23 @@ def q1_prepare(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     grp = dfy.groupby("university").median(numeric_only=True)
 
     # Save table
-    save_table(grp.sort_values("gross_monthly_median", ascending=False), f"q1_latest_{ly}_by_university_median")
+    save_table(
+        grp.sort_values("gross_monthly_median", ascending=False),
+        f"q1_latest_{ly}_by_university_median",
+    )
 
     return grp, ly
+
 
 def q1_plot(grp: pd.DataFrame, ly: int) -> None:
     # Salary bar
     if "gross_monthly_median" in grp.columns:
-        ax = grp.sort_values("gross_monthly_median", ascending=False)["gross_monthly_median"].plot(
-            kind="bar", title=f"Median Gross Monthly Salary by University (Latest year {ly})", rot=45
+        ax = grp.sort_values("gross_monthly_median", ascending=False)[
+            "gross_monthly_median"
+        ].plot(
+            kind="bar",
+            title=f"Median Gross Monthly Salary by University (Latest year {ly})",
+            rot=45,
         )
         ax.set_xlabel("university")
         ax.set_ylabel("Gross monthly median (SGD)")
@@ -98,8 +123,12 @@ def q1_plot(grp: pd.DataFrame, ly: int) -> None:
 
     # Employment rate bar
     if "employment_rate_overall" in grp.columns:
-        ax = grp.sort_values("employment_rate_overall", ascending=False)["employment_rate_overall"].plot(
-            kind="bar", title=f"Median Employment Rate by University (Latest year {ly})", rot=45
+        ax = grp.sort_values("employment_rate_overall", ascending=False)[
+            "employment_rate_overall"
+        ].plot(
+            kind="bar",
+            title=f"Median Employment Rate by University (Latest year {ly})",
+            rot=45,
         )
         ax.set_xlabel("university")
         ax.set_ylabel("Employment rate (%)")
@@ -107,6 +136,7 @@ def q1_plot(grp: pd.DataFrame, ly: int) -> None:
         fig.tight_layout()
         fig.savefig(OUTPUT_DIR / f"q1_bar_emp_latest_{ly}.png", dpi=150)
         plt.close(fig)
+
 
 # ============== Q2: Trend over time by university (lines) ==============
 def q2_prepare(df: pd.DataFrame) -> pd.DataFrame:
@@ -117,19 +147,29 @@ def q2_prepare(df: pd.DataFrame) -> pd.DataFrame:
     ensure_not_empty(d, "Q2 raw")
 
     # group median for stability
-    g = d.groupby(["year", "university"])["gross_monthly_median"].median().unstack("university")
+    g = (
+        d.groupby(["year", "university"])["gross_monthly_median"]
+        .median()
+        .unstack("university")
+    )
     g = g.sort_index()  # sort by year
     save_table(g, "q2_trend_table_year_univ_salary_median")
     return g
 
+
 def q2_plot(trend_df: pd.DataFrame) -> None:
-    ax = trend_df.plot(kind="line", marker="o", title="Median Gross Monthly Salary Trend by University (Yearly)")
+    ax = trend_df.plot(
+        kind="line",
+        marker="o",
+        title="Median Gross Monthly Salary Trend by University (Yearly)",
+    )
     ax.set_xlabel("year")
     ax.set_ylabel("Gross monthly median (SGD)")
     fig = ax.get_figure()
     fig.tight_layout()
     fig.savefig(OUTPUT_DIR / "q2_trend_lines_salary_by_university.png", dpi=150)
     plt.close(fig)
+
 
 # ============== Q3: Relationship between employment rate and salary (scatter) ==============
 def q3_prepare(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
@@ -143,12 +183,13 @@ def q3_prepare(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     save_table(d.describe().transpose(), f"q3_latest_{ly}_scatter_numeric_describe")
     return d, ly
 
+
 def q3_plot(scatter_df: pd.DataFrame, ly: int) -> None:
     ax = scatter_df.plot(
         kind="scatter",
         x="employment_rate_overall",
         y="gross_monthly_median",
-        title=f"Employment Rate vs Gross Monthly Median (Latest year {ly})"
+        title=f"Employment Rate vs Gross Monthly Median (Latest year {ly})",
     )
     ax.set_xlabel("Employment rate (%)")
     ax.set_ylabel("Gross monthly median (SGD)")
@@ -156,6 +197,7 @@ def q3_plot(scatter_df: pd.DataFrame, ly: int) -> None:
     fig.tight_layout()
     fig.savefig(OUTPUT_DIR / f"q3_scatter_emp_vs_salary_latest_{ly}.png", dpi=150)
     plt.close(fig)
+
 
 # ================== Main ==================
 def main() -> None:
@@ -185,6 +227,7 @@ def main() -> None:
     print(f"   Input : {file_path}")
     print(f"   Output: {OUTPUT_DIR.resolve()}")
     print("   Artifacts: Q1 tables/bars, Q2 trend lines, Q3 scatter + describe")
+
 
 if __name__ == "__main__":
     main()

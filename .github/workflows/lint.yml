@@ -11,48 +11,49 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ 获取代码
+      # 1) 拉代码
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ 设置 Python 环境（与本地一致）
+      # 2) Python 环境
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 3️⃣ 安装依赖
+      # 3) 安装依赖（先 requirements，再工具）
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
           python -m pip install flake8 ruff black pylint
 
-      # 4️⃣ 运行 flake8（读取根目录 .flake8 配置，行长=120）
+      # 4) flake8（显式 120 列；忽略 E203/W503；统计输出）
       - name: Run flake8
         run: |
           echo "=== Running flake8 ==="
-          python -m flake8 --config .flake8 src --statistics
+          python -m flake8 src --max-line-length=120 --extend-ignore=E203,W503 --statistics
 
-      # 5️⃣ 运行 ruff
+      # 5) ruff（只检查，不自动修；你也可以加 --fix）
       - name: Run ruff
         run: |
           echo "=== Running ruff ==="
           python -m ruff check src
 
-      # 6️⃣ 运行 pylint（仅提示，不挡流水线可选）
+      # 6) pylint（仅提示，不阻塞；如需阻塞去掉 `|| true`）
       - name: Run pylint
         run: |
           echo "=== Running pylint ==="
           python -m pylint $(git ls-files 'src/**/*.py') || true
 
-      # 7️⃣ 检查 black 格式（只检查不改）
+      # 7) black（只检查格式，不改动）
       - name: Check black format
         run: |
           echo "=== Checking black formatting ==="
           python -m black --check src
 
-      # 8️⃣ 输出最终状态
+      # 8) 完成
       - name: Done
-        run: echo "✅ Linting workflow completed successfully!"
+        run: echo "✅ Linting workflow completed!"
+
 
