@@ -34,11 +34,23 @@ from typing import Optional, Tuple, Dict
 
 import pandas as pd
 from sqlalchemy import (
-    create_engine, event, Integer, String, Numeric, CheckConstraint, ForeignKey,
-    UniqueConstraint, Index
+    create_engine,
+    event,
+    Integer,
+    String,
+    Numeric,
+    CheckConstraint,
+    ForeignKey,
+    UniqueConstraint,
+    Index,
 )
 from sqlalchemy.orm import (
-    DeclarativeBase, Mapped, mapped_column, relationship, Session, sessionmaker
+    DeclarativeBase,
+    Mapped,
+    mapped_column,
+    relationship,
+    Session,
+    sessionmaker,
 )
 
 
@@ -57,6 +69,7 @@ def build_engine(db_url: str):
     engine = create_engine(db_url, echo=False, future=True)
 
     if engine.url.get_backend_name() == "sqlite":
+
         @event.listens_for(engine, "connect")
         def _set_sqlite_pragma(dbapi_connection, connection_record):
             cur = dbapi_connection.cursor()
@@ -182,7 +195,9 @@ class SurveyResult(Base):
     year: Mapped["SurveyYear"] = relationship(back_populates="results")
 
     def __repr__(self) -> str:
-        return f"<SurveyResult id={self.id} prog={self.programme_id} year={self.year_id}>"
+        return (
+            f"<SurveyResult id={self.id} prog={self.programme_id} year={self.year_id}>"
+        )
 
 
 # ----------------------------
@@ -243,9 +258,13 @@ def parse_dataframe(df: pd.DataFrame) -> list[Row]:
     df2 = df.rename(columns=rename_map).copy()
 
     required = [
-        "university", "programme", "year",
-        "employment_overall", "employment_ft_perm",
-        "basic_monthly_median", "gross_monthly_median"
+        "university",
+        "programme",
+        "year",
+        "employment_overall",
+        "employment_ft_perm",
+        "basic_monthly_median",
+        "gross_monthly_median",
     ]
     missing = [c for c in required if c not in df2.columns]
     if missing:
@@ -284,11 +303,7 @@ def get_or_create_university(sess: Session, name: str) -> University:
 
 
 def get_or_create_programme(sess: Session, uni_id: int, name: str) -> Programme:
-    obj = (
-        sess.query(Programme)
-        .filter_by(university_id=uni_id, name=name)
-        .one_or_none()
-    )
+    obj = sess.query(Programme).filter_by(university_id=uni_id, name=name).one_or_none()
     if obj:
         return obj
     obj = Programme(university_id=uni_id, name=name)
@@ -315,7 +330,8 @@ def upsert_result(sess: Session, prog_id: int, year_id: int, r: Row):
     )
     if obj is None:
         obj = SurveyResult(
-            programme_id=prog_id, year_id=year_id,
+            programme_id=prog_id,
+            year_id=year_id,
             employment_overall=r.emp_overall,
             employment_ft_perm=r.emp_ft_perm,
             basic_monthly_median=r.basic_median,
@@ -352,13 +368,15 @@ def audit_and_fix_gross_basic(sess: Session, out_csv: str) -> int:
 
     recs = []
     for x in q:
-        recs.append({
-            "result_id": x.id,
-            "programme_id": x.programme_id,
-            "year_id": x.year_id,
-            "gross": float(x.gross_monthly_median),
-            "basic": float(x.basic_monthly_median),
-        })
+        recs.append(
+            {
+                "result_id": x.id,
+                "programme_id": x.programme_id,
+                "year_id": x.year_id,
+                "gross": float(x.gross_monthly_median),
+                "basic": float(x.basic_monthly_median),
+            }
+        )
         # Clamp (soft fix)
         x.gross_monthly_median = x.basic_monthly_median
 
@@ -471,7 +489,9 @@ def main():
 
         # Audit & clamp
         n_bad = audit_and_fix_gross_basic(sess, out_csv="audit_gross_lt_basic.csv")
-        print(f"[AUDIT] gross < basic rows: {n_bad} (clamped; details -> audit_gross_lt_basic.csv)")
+        print(
+            f"[AUDIT] gross < basic rows: {n_bad} (clamped; details -> audit_gross_lt_basic.csv)"
+        )
 
     # Stats
     with SessionLocal() as sess:
