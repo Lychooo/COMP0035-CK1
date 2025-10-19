@@ -116,7 +116,9 @@ class SurveyYear(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     year: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
 
-    __table_args__ = (CheckConstraint("year BETWEEN 2000 AND 2100", name="ck_year_range"),)
+    __table_args__ = (
+        CheckConstraint("year BETWEEN 2000 AND 2100", name="ck_year_range"),
+    )
 
     results: Mapped[List["SurveyResult"]] = relationship(
         back_populates="year", cascade="all, delete-orphan"
@@ -466,7 +468,9 @@ def main() -> None:
     # audit export
     if audit_rows:
         pd.DataFrame(audit_rows).to_csv("audit_gross_lt_basic.csv", index=False)
-        print(f"[AUDIT] gross < basic rows: {len(audit_rows)} -> audit_gross_lt_basic.csv")
+        print(
+            f"[AUDIT] gross < basic rows: {len(audit_rows)} -> audit_gross_lt_basic.csv"
+        )
     else:
         print("[AUDIT] gross < basic rows: 0")
 
