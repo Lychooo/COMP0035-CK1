@@ -111,20 +111,29 @@ def q1_prepare(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
 
 
 def q1_plot(grp: pd.DataFrame, ly: int) -> None:
+    """Vertical bars with improved label alignment and readability."""
     # Salary bar
     if "gross_monthly_median" in grp.columns:
         ax = grp.sort_values("gross_monthly_median", ascending=False)[
             "gross_monthly_median"
         ].plot(
             kind="bar",
+            figsize=(12, 6),
             title=f"Median Gross Monthly Salary by University (Latest year {ly})",
-            rot=45,
+            rot=0,
         )
+        # right-align, rotate labels slightly to match bars
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=30, ha="right")
         ax.set_xlabel("university")
         ax.set_ylabel("Gross monthly median (SGD)")
+        ax.tick_params(axis="x", pad=6)
         fig = ax.get_figure()
         fig.tight_layout()
-        fig.savefig(OUTPUT_DIR / f"q1_bar_salary_latest_{ly}.png", dpi=150)
+        fig.savefig(
+            OUTPUT_DIR / f"q1_bar_salary_latest_{ly}.png",
+            dpi=200,
+            bbox_inches="tight",
+        )
         plt.close(fig)
 
     # Employment rate bar
@@ -133,14 +142,22 @@ def q1_plot(grp: pd.DataFrame, ly: int) -> None:
             "employment_rate_overall"
         ].plot(
             kind="bar",
+            figsize=(12, 6),
             title=f"Median Employment Rate by University (Latest year {ly})",
-            rot=45,
+            rot=0,
         )
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=30, ha="right")
         ax.set_xlabel("university")
         ax.set_ylabel("Employment rate (%)")
+        ax.set_ylim(0, 100)
+        ax.tick_params(axis="x", pad=6)
         fig = ax.get_figure()
         fig.tight_layout()
-        fig.savefig(OUTPUT_DIR / f"q1_bar_emp_latest_{ly}.png", dpi=150)
+        fig.savefig(
+            OUTPUT_DIR / f"q1_bar_emp_latest_{ly}.png",
+            dpi=200,
+            bbox_inches="tight",
+        )
         plt.close(fig)
 
 
@@ -241,3 +258,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
