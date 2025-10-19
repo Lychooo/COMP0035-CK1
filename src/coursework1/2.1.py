@@ -5,6 +5,7 @@ Section 2.1 – Database design (ERD) + load data (SQLAlchemy, SQLite)
 
 USAGE (simple):
   python 2.1.py
+
 USAGE (custom):
   python 2.1.py --csv "path/to/your.csv" --db "ges.db" --reset
 
@@ -19,34 +20,34 @@ What this script does
 3) BEFORE INSERT: audit rows with gross < basic, clamp gross=basic, then insert.
    -> writes audit_gross_lt_basic.csv with original values.
 4) Exports a Mermaid ER diagram to erd.md.
-
 """
 
 from __future__ import annotations
+
 import argparse
 import math
 import os
 from dataclasses import dataclass
-from typing import Optional, Tuple, Dict, List
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from sqlalchemy import (
-    create_engine,
-    event,
-    Integer,
-    String,
-    Numeric,
     CheckConstraint,
     ForeignKey,
-    UniqueConstraint,
     Index,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+    create_engine,
+    event,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
+    Session,
     mapped_column,
     relationship,
-    Session,
     sessionmaker,
 )
 
@@ -77,6 +78,7 @@ def build_engine(db_url: str):
 # ----------------------------
 class University(Base):
     __tablename__ = "university"
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     country: Mapped[Optional[str]] = mapped_column(String(100))
@@ -89,6 +91,7 @@ class University(Base):
 
 class Programme(Base):
     __tablename__ = "programme"
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     university_id: Mapped[int] = mapped_column(
         ForeignKey("university.id", ondelete="CASCADE"), nullable=False, index=True
@@ -109,12 +112,11 @@ class Programme(Base):
 
 class SurveyYear(Base):
     __tablename__ = "survey_year"
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     year: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
 
-    __table_args__ = (
-        CheckConstraint("year BETWEEN 2000 AND 2100", name="ck_year_range"),
-    )
+    __table_args__ = (CheckConstraint("year BETWEEN 2000 AND 2100", name="ck_year_range"),)
 
     results: Mapped[List["SurveyResult"]] = relationship(
         back_populates="year", cascade="all, delete-orphan"
@@ -123,6 +125,7 @@ class SurveyYear(Base):
 
 class SurveyResult(Base):
     __tablename__ = "survey_result"
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     programme_id: Mapped[int] = mapped_column(
@@ -202,12 +205,13 @@ def _clean_year(y) -> Optional[int]:
         return None
 
 
-def parse_dataframe(df: pd.DataFrame) -> list[Row]:
+def parse_dataframe(df: pd.DataFrame) -> List[Row]:
     """
     Map raw GES CSV columns to the unified Row model.
-    - programme = school + " - " + degree
-    - employment_rate_overall -> employment_overall
-    - employment_rate_ft_perm -> employment_ft_perm
+
+    programme:
+      - If both 'school' and 'degree' exist, use "school - degree".
+      - Otherwise fall back to 'degree' only (typical in this dataset).
     """
     rename_map = {
         "university": "university",
@@ -219,15 +223,17 @@ def parse_dataframe(df: pd.DataFrame) -> list[Row]:
     }
     df2 = df.rename(columns=rename_map).copy()
 
-    # Build programme from school + degree
-    school = df2["school"].astype(str) if "school" in df2.columns else ""
-    degree = df2["degree"].astype(str) if "degree" in df2.columns else ""
-    if isinstance(school, str):  # both missing
-        df2["programme"] = degree if degree is not None else ""
+    # Build 'programme'
+    if "degree" in df2.columns and "school" in df2.columns:
+        df2["programme"] = (
+            df2["school"].astype(str).str.strip()
+            + " - "
+            + df2["degree"].astype(str).str.strip()
+        ).str.strip(" -")
+    elif "degree" in df2.columns:
+        df2["programme"] = df2["degree"].astype(str).str.strip()
     else:
-        df2["programme"] = (school.fillna("") + " - " + degree.fillna("")).str.strip(
-            " -"
-        )
+        df2["programme"] = df2.get("programme", df2.get("university", "")).astype(str)
 
     required = [
         "university",
@@ -242,7 +248,7 @@ def parse_dataframe(df: pd.DataFrame) -> list[Row]:
     if missing:
         raise ValueError(f"Missing required columns after rename: {missing}")
 
-    out: list[Row] = []
+    out: List[Row] = []
     for _, r in df2.iterrows():
         yr = _clean_year(r["year"])
         if yr is None:
@@ -294,7 +300,7 @@ def get_or_create_year(sess: Session, year: int) -> SurveyYear:
     return obj
 
 
-def upsert_result(sess: Session, prog_id: int, year_id: int, r: Row):
+def upsert_result(sess: Session, prog_id: int, year_id: int, r: Row) -> None:
     obj = (
         sess.query(SurveyResult)
         .filter_by(programme_id=prog_id, year_id=year_id)
@@ -318,43 +324,45 @@ def upsert_result(sess: Session, prog_id: int, year_id: int, r: Row):
 
 
 # ----------------------------
-# ERD export
+# ERD export (Mermaid, parse-safe)
 # ----------------------------
-def export_mermaid_erd(path: str = "erd.md"):
+def export_mermaid_erd(path: str = "erd.md") -> None:
+    # Mermaid erDiagram 仅支持：类型 名称 [PK|FK]
+    # 关系、约束等用关系线或在报告里说明，不要写在字段行里。
     mermaid = """```mermaid
 erDiagram
-    UNIVERSITY ||--o{ PROGRAMME : has
-    PROGRAMME ||--o{ SURVEY_RESULT : has
-    SURVEY_YEAR ||--o{ SURVEY_RESULT : has
+  UNIVERSITY  ||--o{ PROGRAMME     : has
+  PROGRAMME   ||--o{ SURVEY_RESULT : has
+  SURVEY_YEAR ||--o{ SURVEY_RESULT : has
 
-    UNIVERSITY {
-        integer id PK
-        string  name  "UNIQUE, NOT NULL"
-        string  country
-        string  region
-    }
+  UNIVERSITY {
+    int    id      PK
+    string name
+    string country
+    string region
+  }
 
-    PROGRAMME {
-        integer id PK
-        integer university_id FK "-> UNIVERSITY.id (ON DELETE CASCADE)"
-        string  name  "NOT NULL"
-        string  code
-    }
+  PROGRAMME {
+    int    id           PK
+    int    university_id FK
+    string name
+    string code
+  }
 
-    SURVEY_YEAR {
-        integer id PK
-        integer year "UNIQUE, CHECK 2000..2100"
-    }
+  SURVEY_YEAR {
+    int    id    PK
+    int    year
+  }
 
-    SURVEY_RESULT {
-        integer id PK
-        integer programme_id FK "-> PROGRAMME.id (ON DELETE CASCADE)"
-        integer year_id FK "-> SURVEY_YEAR.id (ON DELETE CASCADE)"
-        numeric employment_overall  "0..100"
-        numeric employment_ft_perm  "0..100"
-        numeric basic_monthly_median ">= 0"
-        numeric gross_monthly_median ">= basic_monthly_median"
-    }
+  SURVEY_RESULT {
+    int    id                 PK
+    int    programme_id       FK
+    int    year_id            FK
+    float  employment_overall
+    float  employment_ft_perm
+    float  basic_monthly_median
+    float  gross_monthly_median
+  }
 ```"""
     with open(path, "w", encoding="utf-8") as f:
         f.write(mermaid)
@@ -363,7 +371,7 @@ erDiagram
 # ----------------------------
 # Main
 # ----------------------------
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
 
     # Default paths relative to repo root
@@ -449,18 +457,16 @@ def main():
                     emp_overall=r.emp_overall,
                     emp_ft_perm=r.emp_ft_perm,
                     basic_median=bm,
-                    gross_median=bm,  # clamp here
+                    gross_median=bm,  # clamp
                 )
-            # -------------------------------
+            # --------------------------------
 
             upsert_result(sess, p_id, y_id, r)
 
     # audit export
     if audit_rows:
         pd.DataFrame(audit_rows).to_csv("audit_gross_lt_basic.csv", index=False)
-        print(
-            f"[AUDIT] gross < basic rows: {len(audit_rows)} -> audit_gross_lt_basic.csv"
-        )
+        print(f"[AUDIT] gross < basic rows: {len(audit_rows)} -> audit_gross_lt_basic.csv")
     else:
         print("[AUDIT] gross < basic rows: 0")
 
