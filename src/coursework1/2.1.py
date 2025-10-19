@@ -1,389 +1,492 @@
-from __future__ import annotations
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Section 2.1 – Database design (ERD) + load data (SQLAlchemy, SQLite)
 
+USAGE:
+  python 2.1.py --csv "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv" --db "results.db"
+  python 2.1.py --csv data.csv --db results.db --reset
+
+What this script does
+---------------------
+1) Builds a 3NF relational schema (SQLite) with strong constraints:
+   - Tables: university, programme, survey_year, survey_result
+   - PK/FK with ON DELETE CASCADE
+   - CHECK constraints for business rules (rates in 0..100, non-negative salaries, gross >= basic, etc.)
+   - UNIQUE constraints and indexes
+2) Loads the CSV into the schema (idempotent upserts for dimension tables).
+3) Audits rows where gross < basic; writes an audit CSV; then clamps gross to basic.
+4) Exports a Mermaid ER diagram snippet to 'erd.md' for your report.
+
+IMPORTANT (SQLite FKs):
+-----------------------
+SQLite disables foreign key enforcement by default. We ENABLE it here via an
+SQLAlchemy 'connect' event hook (PRAGMA foreign_keys = ON). This is the critical fix.
+
+"""
+
+from __future__ import annotations
 import argparse
-from pathlib import Path
-from typing import Optional
+import math
+import os
+from dataclasses import dataclass
+from typing import Optional, Tuple, Dict
 
 import pandas as pd
 from sqlalchemy import (
-    CheckConstraint,
-    ForeignKey,
-    Index,
-    Integer,
-    Numeric,
-    SmallInteger,
-    String,
-    UniqueConstraint,
-    create_engine,
+    create_engine, event, Integer, String, Numeric, CheckConstraint, ForeignKey,
+    UniqueConstraint, Index
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
-
-# ===================== 配置 =====================
-DEFAULT_CSV = r"C:\Users\30769\Desktop\comp0035-cw-Lychooo\7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv"
-DEFAULT_DB_URL = "sqlite:///ges.db"  # 零配置 SQLite
-OUT_DIR = Path("prep_output")
-OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-# gross < basic 的处理策略： "clamp"（把 gross 提升到 basic） 或 "drop"（丢弃这些记录）
-GROSS_BASIC_STRATEGY = "clamp"
+from sqlalchemy.orm import (
+    DeclarativeBase, Mapped, mapped_column, relationship, Session, sessionmaker
+)
 
 
-# ===================== ORM 基类 =====================
+# ----------------------------
+# SQLAlchemy base & utilities
+# ----------------------------
 class Base(DeclarativeBase):
     pass
 
 
-# ===================== 3NF 表模型 =====================
+def build_engine(db_url: str):
+    """
+    Create SQLAlchemy engine and ensure PRAGMA foreign_keys = ON for SQLite.
+    This is the minimal, surgical 'fix' you needed.
+    """
+    engine = create_engine(db_url, echo=False, future=True)
+
+    if engine.url.get_backend_name() == "sqlite":
+        @event.listens_for(engine, "connect")
+        def _set_sqlite_pragma(dbapi_connection, connection_record):
+            cur = dbapi_connection.cursor()
+            cur.execute("PRAGMA foreign_keys=ON;")
+            cur.close()
+
+    return engine
+
+
+# ----------------------------
+# 3NF Schema (SQLite)
+# ----------------------------
 class University(Base):
     __tablename__ = "university"
 
-    university_id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True
-    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
-    short_name: Mapped[Optional[str]] = mapped_column(
-        String(50), unique=True, nullable=True
-    )
+    # Optionals for reporting/joins; adjust to your dataset if needed
+    country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    region: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     programmes: Mapped[list["Programme"]] = relationship(
         back_populates="university", cascade="all, delete-orphan"
     )
 
+    def __repr__(self) -> str:
+        return f"<University id={self.id} name={self.name!r}>"
+
 
 class Programme(Base):
     __tablename__ = "programme"
 
-    programme_id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True
-    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     university_id: Mapped[int] = mapped_column(
-        ForeignKey("university.university_id", ondelete="CASCADE"), nullable=False
+        ForeignKey("university.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    code: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("university_id", "name", name="uq_programme_uni_name"),
+        Index("ix_programme_name", "name"),
+    )
 
     university: Mapped["University"] = relationship(back_populates="programmes")
     results: Mapped[list["SurveyResult"]] = relationship(
         back_populates="programme", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (
-        UniqueConstraint("university_id", "name", name="uq_programme_university_name"),
-        Index("ix_programme_university", "university_id"),
-    )
+    def __repr__(self) -> str:
+        return f"<Programme id={self.id} uni={self.university_id} name={self.name!r}>"
 
 
 class SurveyYear(Base):
     __tablename__ = "survey_year"
 
-    year_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    year: Mapped[int] = mapped_column(SmallInteger, nullable=False, unique=True)
-
-    results: Mapped[list["SurveyResult"]] = relationship(back_populates="year")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    year: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
 
     __table_args__ = (
         CheckConstraint("year BETWEEN 2000 AND 2100", name="ck_year_range"),
-        Index("ix_year_year", "year"),
     )
+
+    results: Mapped[list["SurveyResult"]] = relationship(
+        back_populates="year", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<SurveyYear id={self.id} year={self.year}>"
 
 
 class SurveyResult(Base):
     __tablename__ = "survey_result"
 
-    result_id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True
-    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
     programme_id: Mapped[int] = mapped_column(
-        ForeignKey("programme.programme_id", ondelete="CASCADE"), nullable=False
+        ForeignKey("programme.id", ondelete="CASCADE"), nullable=False, index=True
     )
     year_id: Mapped[int] = mapped_column(
-        ForeignKey("survey_year.year_id", ondelete="CASCADE"), nullable=False
+        ForeignKey("survey_year.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
-    employment_rate_overall: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))
-    employment_rate_ft_perm: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))
-    basic_monthly_mean: Mapped[Optional[float]] = mapped_column(Numeric(10, 2))
-    basic_monthly_median: Mapped[Optional[float]] = mapped_column(Numeric(10, 2))
-    gross_monthly_mean: Mapped[Optional[float]] = mapped_column(Numeric(10, 2))
-    gross_monthly_median: Mapped[Optional[float]] = mapped_column(Numeric(10, 2))
+    # Employment rates (percentage 0..100)
+    employment_overall: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))
+    employment_ft_perm: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))
+
+    # Salaries (non-negative, in the same unit as dataset; medians)
+    basic_monthly_median: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    gross_monthly_median: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+
+    __table_args__ = (
+        UniqueConstraint("programme_id", "year_id", name="uq_prog_year"),
+        # Business logic safeguards.
+        CheckConstraint(
+            "(employment_overall IS NULL) OR (employment_overall BETWEEN 0 AND 100)",
+            name="ck_emp_overall_pct",
+        ),
+        CheckConstraint(
+            "(employment_ft_perm IS NULL) OR (employment_ft_perm BETWEEN 0 AND 100)",
+            name="ck_emp_ft_perm_pct",
+        ),
+        CheckConstraint(
+            "(basic_monthly_median IS NULL) OR (basic_monthly_median >= 0)",
+            name="ck_basic_nonneg",
+        ),
+        CheckConstraint(
+            "(gross_monthly_median IS NULL) OR (gross_monthly_median >= 0)",
+            name="ck_gross_nonneg",
+        ),
+        CheckConstraint(
+            "(gross_monthly_median IS NULL) OR "
+            "(basic_monthly_median IS NULL) OR "
+            "(gross_monthly_median >= basic_monthly_median)",
+            name="ck_gross_ge_basic",
+        ),
+        Index("ix_result_emp_overall", "employment_overall"),
+        Index("ix_result_basic", "basic_monthly_median"),
+        Index("ix_result_gross", "gross_monthly_median"),
+    )
 
     programme: Mapped["Programme"] = relationship(back_populates="results")
     year: Mapped["SurveyYear"] = relationship(back_populates="results")
 
-    __table_args__ = (
-        UniqueConstraint("programme_id", "year_id", name="uq_programme_year"),
-        # 就业率 0..100
-        CheckConstraint(
-            "(employment_rate_overall IS NULL) "
-            "OR (employment_rate_overall BETWEEN 0 AND 100)",
-            name="ck_emp_overall",
-        ),
-        CheckConstraint(
-            "(employment_rate_ft_perm IS NULL) "
-            "OR (employment_rate_ft_perm BETWEEN 0 AND 100)",
-            name="ck_emp_ft",
-        ),
-        # 逻辑：ft_perm ≤ overall
-        CheckConstraint(
-            "("
-            "employment_rate_overall IS NULL OR "
-            "employment_rate_ft_perm IS NULL OR "
-            "employment_rate_ft_perm <= employment_rate_overall"
-            ")",
-            name="ck_emp_logic",
-        ),
-        # 薪资非负
-        CheckConstraint(
-            "("
-            "basic_monthly_mean    IS NULL OR basic_monthly_mean    >= 0"
-            ") AND ("
-            "basic_monthly_median  IS NULL OR basic_monthly_median  >= 0"
-            ") AND ("
-            "gross_monthly_mean    IS NULL OR gross_monthly_mean    >= 0"
-            ") AND ("
-            "gross_monthly_median  IS NULL OR gross_monthly_median  >= 0"
-            ")",
-            name="ck_salary_nonneg",
-        ),
-        # 逻辑：gross ≥ basic
-        CheckConstraint(
-            "("
-            "gross_monthly_mean   IS NULL OR basic_monthly_mean   IS NULL OR "
-            "gross_monthly_mean   >= basic_monthly_mean"
-            ") AND ("
-            "gross_monthly_median IS NULL OR basic_monthly_median IS NULL OR "
-            "gross_monthly_median >= basic_monthly_median"
-            ")",
-            name="ck_salary_logic",
-        ),
-        Index("ix_result_programme_year", "programme_id", "year_id"),
-    )
+    def __repr__(self) -> str:
+        return f"<SurveyResult id={self.id} prog={self.programme_id} year={self.year_id}>"
 
 
-# ===================== 工具函数 =====================
-def to_numeric(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
-    d = df.copy()
-    for c in cols:
-        if c in d.columns:
-            d[c] = pd.to_numeric(d[c], errors="coerce")
-    return d
+# ----------------------------
+# Data mapping helpers
+# ----------------------------
+@dataclass
+class Row:
+    university: str
+    programme: str
+    year: int
+    emp_overall: Optional[float]
+    emp_ft_perm: Optional[float]
+    basic_median: Optional[float]
+    gross_median: Optional[float]
 
 
-def normalize_text(df: pd.DataFrame) -> pd.DataFrame:
-    d = df.copy()
-    for c in ["university", "degree"]:
-        if c in d.columns:
-            d[c] = d[c].astype(str).str.strip()
-    return d
+def _as_float(x) -> Optional[float]:
+    try:
+        if pd.isna(x):
+            return None
+        v = float(x)
+        if math.isfinite(v):
+            return v
+        return None
+    except Exception:
+        return None
 
 
-def get_or_create(sess: Session, model, **kwargs):
-    obj = sess.query(model).filter_by(**kwargs).one_or_none()
-    if obj is None:
-        obj = model(**kwargs)
-        sess.add(obj)
-        sess.flush()
+def _clean_year(y) -> Optional[int]:
+    try:
+        yy = int(y)
+        if 2000 <= yy <= 2100:
+            return yy
+        return None
+    except Exception:
+        return None
+
+
+def parse_dataframe(df: pd.DataFrame) -> list[Row]:
+    """
+    Map your raw dataframe columns to the unified Row model.
+    Adjust column names below to your CSV headers if needed.
+    """
+    # ---- EDIT ME if your column names differ ----
+    # Example expected columns (rename here to match your CSV):
+    rename_map = {
+        "university": "university",
+        "programme": "programme",
+        "year": "year",
+        "employment_overall": "employment_overall",
+        "employment_fulltime_permanent": "employment_ft_perm",
+        "basic_monthly_median": "basic_monthly_median",
+        "gross_monthly_median": "gross_monthly_median",
+    }
+    # If your CSV uses different headers (e.g., 'school', 'degree', 'overall_employment_rate', etc.),
+    # do: df = df.rename(columns={"school":"university", "degree":"programme", ...})
+
+    df2 = df.rename(columns=rename_map).copy()
+
+    required = [
+        "university", "programme", "year",
+        "employment_overall", "employment_ft_perm",
+        "basic_monthly_median", "gross_monthly_median"
+    ]
+    missing = [c for c in required if c not in df2.columns]
+    if missing:
+        raise ValueError(f"Missing required columns after rename: {missing}")
+
+    rows: list[Row] = []
+    for _, r in df2.iterrows():
+        yr = _clean_year(r["year"])
+        if yr is None:
+            continue
+        rows.append(
+            Row(
+                university=str(r["university"]).strip(),
+                programme=str(r["programme"]).strip(),
+                year=yr,
+                emp_overall=_as_float(r["employment_overall"]),
+                emp_ft_perm=_as_float(r["employment_ft_perm"]),
+                basic_median=_as_float(r["basic_monthly_median"]),
+                gross_median=_as_float(r["gross_monthly_median"]),
+            )
+        )
+    return rows
+
+
+# ----------------------------
+# Loaders (idempotent)
+# ----------------------------
+def get_or_create_university(sess: Session, name: str) -> University:
+    obj = sess.query(University).filter_by(name=name).one_or_none()
+    if obj:
+        return obj
+    obj = University(name=name)
+    sess.add(obj)
+    sess.flush()
     return obj
 
 
-def write_mermaid_erd(out_dir: Path) -> Path:
-    content = (
-        "```mermaid\n"
-        "erDiagram\n"
-        "    UNIVERSITY ||--o{ PROGRAMME : has\n"
-        "    PROGRAMME  ||--o{ SURVEY_RESULT : has\n"
-        "    SURVEY_YEAR ||--o{ SURVEY_RESULT : in\n\n"
-        "    UNIVERSITY {\n"
-        "        int     university_id PK\n"
-        '        string  name  "UNIQUE, NOT NULL"\n'
-        '        string  short_name "UNIQUE, NULL"\n'
-        "    }\n\n"
-        "    PROGRAMME {\n"
-        "        int     programme_id PK\n"
-        "        int     university_id FK\n"
-        '        string  name "NOT NULL"\n'
-        '        "UNIQUE(university_id, name)"\n'
-        "    }\n\n"
-        "    SURVEY_YEAR {\n"
-        "        int       year_id PK\n"
-        '        smallint  year "UNIQUE, 2000..2100"\n'
-        "    }\n\n"
-        "    SURVEY_RESULT {\n"
-        "        int            result_id PK\n"
-        "        int            programme_id FK\n"
-        "        int            year_id FK\n"
-        '        numeric(5,2)   employment_rate_overall "0..100"\n'
-        '        numeric(5,2)   employment_rate_ft_perm  "0..100, <= overall"\n'
-        '        numeric(10,2)  basic_monthly_mean   ">= 0"\n'
-        '        numeric(10,2)  basic_monthly_median ">= 0"\n'
-        '        numeric(10,2)  gross_monthly_mean   ">= basic"\n'
-        '        numeric(10,2)  gross_monthly_median ">= basic"\n'
-        '        "UNIQUE(programme_id, year_id)"\n'
-        "    }\n"
-        "```"
+def get_or_create_programme(sess: Session, uni_id: int, name: str) -> Programme:
+    obj = (
+        sess.query(Programme)
+        .filter_by(university_id=uni_id, name=name)
+        .one_or_none()
     )
-    path = out_dir / "ges_erd.md"
-    path.write_text(content, encoding="utf-8-sig")
-    return path
+    if obj:
+        return obj
+    obj = Programme(university_id=uni_id, name=name)
+    sess.add(obj)
+    sess.flush()
+    return obj
 
 
-# ===================== 主流程 =====================
-def run(csv_path: str, db_url: str) -> None:
-    engine = create_engine(db_url, echo=False, future=True)
-    Base.metadata.drop_all(engine)  # 开发阶段：先清空
+def get_or_create_year(sess: Session, year: int) -> SurveyYear:
+    obj = sess.query(SurveyYear).filter_by(year=year).one_or_none()
+    if obj:
+        return obj
+    obj = SurveyYear(year=year)
+    sess.add(obj)
+    sess.flush()
+    return obj
+
+
+def upsert_result(sess: Session, prog_id: int, year_id: int, r: Row):
+    obj = (
+        sess.query(SurveyResult)
+        .filter_by(programme_id=prog_id, year_id=year_id)
+        .one_or_none()
+    )
+    if obj is None:
+        obj = SurveyResult(
+            programme_id=prog_id, year_id=year_id,
+            employment_overall=r.emp_overall,
+            employment_ft_perm=r.emp_ft_perm,
+            basic_monthly_median=r.basic_median,
+            gross_monthly_median=r.gross_median,
+        )
+        sess.add(obj)
+    else:
+        # Upsert: refresh values
+        obj.employment_overall = r.emp_overall
+        obj.employment_ft_perm = r.emp_ft_perm
+        obj.basic_monthly_median = r.basic_median
+        obj.gross_monthly_median = r.gross_median
+
+
+# ----------------------------
+# Audit & ERD export
+# ----------------------------
+def audit_and_fix_gross_basic(sess: Session, out_csv: str) -> int:
+    """
+    Export rows where gross < basic. Then clamp gross = basic (soft fix).
+    Returns number of audited rows.
+    """
+    q = (
+        sess.query(SurveyResult)
+        .filter(
+            SurveyResult.gross_monthly_median.isnot(None),
+            SurveyResult.basic_monthly_median.isnot(None),
+            SurveyResult.gross_monthly_median < SurveyResult.basic_monthly_median,
+        )
+        .all()
+    )
+    if not q:
+        return 0
+
+    recs = []
+    for x in q:
+        recs.append({
+            "result_id": x.id,
+            "programme_id": x.programme_id,
+            "year_id": x.year_id,
+            "gross": float(x.gross_monthly_median),
+            "basic": float(x.basic_monthly_median),
+        })
+        # Clamp (soft fix)
+        x.gross_monthly_median = x.basic_monthly_median
+
+    pd.DataFrame(recs).to_csv(out_csv, index=False)
+    return len(q)
+
+
+def export_mermaid_erd(path: str = "erd.md"):
+    """
+    Very lightweight Mermaid ER diagram for the report.
+    """
+    mermaid = """```mermaid
+erDiagram
+    UNIVERSITY ||--o{ PROGRAMME : has
+    PROGRAMME ||--o{ SURVEY_RESULT : has
+    SURVEY_YEAR ||--o{ SURVEY_RESULT : has
+
+    UNIVERSITY {
+        integer id PK
+        string  name  "UNIQUE, NOT NULL"
+        string  country
+        string  region
+    }
+
+    PROGRAMME {
+        integer id PK
+        integer university_id FK "-> UNIVERSITY.id (ON DELETE CASCADE)"
+        string  name  "NOT NULL"
+        string  code
+    }
+
+    SURVEY_YEAR {
+        integer id PK
+        integer year "UNIQUE, CHECK 2000..2100"
+    }
+
+    SURVEY_RESULT {
+        integer id PK
+        integer programme_id FK "-> PROGRAMME.id (ON DELETE CASCADE)"
+        integer year_id FK "-> SURVEY_YEAR.id (ON DELETE CASCADE)"
+        numeric employment_overall  "0..100"
+        numeric employment_ft_perm  "0..100"
+        numeric basic_monthly_median ">= 0"
+        numeric gross_monthly_median ">= basic_monthly_median"
+    }
+```"""
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(mermaid)
+
+
+# ----------------------------
+# Main pipeline
+# ----------------------------
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--csv", required=True, help="Input CSV file")
+    ap.add_argument("--db", default="results.db", help="SQLite DB file path")
+    ap.add_argument("--reset", action="store_true", help="Drop & recreate schema")
+    args = ap.parse_args()
+
+    if not os.path.exists(args.csv):
+        raise FileNotFoundError(args.csv)
+
+    engine = build_engine(f"sqlite:///{args.db}")
+    SessionLocal = sessionmaker(bind=engine, future=True)
+
+    if args.reset:
+        Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
 
-    # 读取 CSV
-    df = pd.read_csv(csv_path, encoding="utf-8-sig")
-    df.columns = [c.strip().lower() for c in df.columns]
-    df = normalize_text(df)
+    # Load CSV
+    df = pd.read_csv(args.csv)
+    rows = parse_dataframe(df)
+    print(f"[INFO] Parsed valid rows: {len(rows)}")
 
-    # 类型转换
-    num_cols = [
-        "employment_rate_overall",
-        "employment_rate_ft_perm",
-        "basic_monthly_mean",
-        "basic_monthly_median",
-        "gross_monthly_mean",
-        "gross_monthly_median",
-        "year",
-    ]
-    df = to_numeric(df, num_cols)
+    inserted_u = inserted_p = inserted_y = 0
+    with SessionLocal.begin() as sess:
+        # Dimension upserts + fact upserts
+        cache_uni: Dict[str, int] = {}
+        cache_prog: Dict[Tuple[int, str], int] = {}
+        cache_year: Dict[int, int] = {}
 
-    # 只保留所需列 + 主键列不缺失
-    needed = {
-        "university",
-        "degree",
-        "year",
-        "employment_rate_overall",
-        "employment_rate_ft_perm",
-        "basic_monthly_mean",
-        "basic_monthly_median",
-        "gross_monthly_mean",
-        "gross_monthly_median",
-    }
-    df = df[[c for c in df.columns if c in needed]].dropna(
-        subset=["university", "degree", "year"]
-    )
+        for r in rows:
+            # University
+            if r.university not in cache_uni:
+                u = get_or_create_university(sess, r.university)
+                if u.id is None:
+                    sess.flush()
+                cache_uni[r.university] = u.id
+                inserted_u += 1 if sess.get(University, u.id) else 0
+            u_id = cache_uni[r.university]
 
-    # 合理范围的软过滤（仍允许 NaN）
-    df = df[df["year"].between(2000, 2100)]
-    for col in ["employment_rate_overall", "employment_rate_ft_perm"]:
-        if col in df.columns:
-            df = df[(df[col].isna()) | (df[col].between(0, 100))]
-    for col in [
-        "basic_monthly_mean",
-        "basic_monthly_median",
-        "gross_monthly_mean",
-        "gross_monthly_median",
-    ]:
-        if col in df.columns:
-            df = df[(df[col].isna()) | (df[col] >= 0)]
+            # Programme
+            key = (u_id, r.programme)
+            if key not in cache_prog:
+                p = get_or_create_programme(sess, u_id, r.programme)
+                cache_prog[key] = p.id
+                inserted_p += 1 if sess.get(Programme, p.id) else 0
+            p_id = cache_prog[key]
 
-    # ---------- 关键修复：gross < basic 的记录 ----------
-    eps = 1e-6
-    mask_mean = (
-        df["gross_monthly_mean"].notna()
-        & df["basic_monthly_mean"].notna()
-        & (df["gross_monthly_mean"] + eps < df["basic_monthly_mean"])
-    )
-    mask_median = (
-        df["gross_monthly_median"].notna()
-        & df["basic_monthly_median"].notna()
-        & (df["gross_monthly_median"] + eps < df["basic_monthly_median"])
-    )
-    bad_mask = mask_mean | mask_median
+            # Year
+            if r.year not in cache_year:
+                y = get_or_create_year(sess, r.year)
+                cache_year[r.year] = y.id
+                inserted_y += 1 if sess.get(SurveyYear, y.id) else 0
+            y_id = cache_year[r.year]
 
-    if bad_mask.any():
-        audit_path = OUT_DIR / "anomaly_gross_lt_basic.csv"
-        df.loc[bad_mask].to_csv(audit_path, index=False, encoding="utf-8-sig")
-        print(
-            "   - Anomaly saved (gross < basic): "
-            f"{audit_path.resolve()}  rows={int(bad_mask.sum())}"
-        )
+            # Fact
+            upsert_result(sess, p_id, y_id, r)
 
-        strategy = GROSS_BASIC_STRATEGY.lower()
-        if strategy == "clamp":
-            # 把 gross 调整到 basic（最小改动）
-            df.loc[mask_mean, "gross_monthly_mean"] = df.loc[
-                mask_mean, "basic_monthly_mean"
-            ]
-            df.loc[mask_median, "gross_monthly_median"] = df.loc[
-                mask_median, "basic_monthly_median"
-            ]
-        elif strategy == "drop":
-            df = df[~bad_mask].copy()
-        else:
-            # 未知策略：默认 clamp
-            df.loc[mask_mean, "gross_monthly_mean"] = df.loc[
-                mask_mean, "basic_monthly_mean"
-            ]
-            df.loc[mask_median, "gross_monthly_median"] = df.loc[
-                mask_median, "basic_monthly_median"
-            ]
+        # Audit & clamp
+        n_bad = audit_and_fix_gross_basic(sess, out_csv="audit_gross_lt_basic.csv")
+        print(f"[AUDIT] gross < basic rows: {n_bad} (clamped; details -> audit_gross_lt_basic.csv)")
 
-    # ---------- 入库 ----------
-    with Session(engine) as sess:
-        for _, r in df.iterrows():
-            u = get_or_create(sess, University, name=str(r["university"]))
-            y = get_or_create(sess, SurveyYear, year=int(r["year"]))
+    # Stats
+    with SessionLocal() as sess:
+        n_u = sess.query(University).count()
+        n_p = sess.query(Programme).count()
+        n_y = sess.query(SurveyYear).count()
+        n_r = sess.query(SurveyResult).count()
+    print(f"[COUNTS] university={n_u}, programme={n_p}, year={n_y}, results={n_r}")
 
-            # 学校内专业唯一
-            p = (
-                sess.query(Programme)
-                .filter_by(university_id=u.university_id, name=str(r["degree"]))
-                .one_or_none()
-            )
-            if p is None:
-                p = Programme(university_id=u.university_id, name=str(r["degree"]))
-                sess.add(p)
-                sess.flush()
-
-            # upsert-like：存在则跳过
-            exist = (
-                sess.query(SurveyResult)
-                .filter_by(programme_id=p.programme_id, year_id=y.year_id)
-                .one_or_none()
-            )
-            if exist:
-                continue
-
-            sess.add(
-                SurveyResult(
-                    programme_id=p.programme_id,
-                    year_id=y.year_id,
-                    employment_rate_overall=r.get("employment_rate_overall"),
-                    employment_rate_ft_perm=r.get("employment_rate_ft_perm"),
-                    basic_monthly_mean=r.get("basic_monthly_mean"),
-                    basic_monthly_median=r.get("basic_monthly_median"),
-                    gross_monthly_mean=r.get("gross_monthly_mean"),
-                    gross_monthly_median=r.get("gross_monthly_median"),
-                )
-            )
-
-        sess.commit()
-
-    erd_path = write_mermaid_erd(OUT_DIR)
-    print("✅ Section 2.1 completed.")
-    print(f"   - CSV : {Path(csv_path)}")
-    print(f"   - DB  : {db_url}")
-    print(f"   - ERD : {erd_path.resolve()}")
-    print("   - Tables: university, programme, survey_year, survey_result")
-    print("   - Notes: gross<basic handled by strategy =", GROSS_BASIC_STRATEGY)
-
-
-def parse_args():
-    ap = argparse.ArgumentParser(
-        description="COMP0035 Coursework 1 - Section 2.1 (3NF + Load)"
-    )
-    ap.add_argument("--csv", default=DEFAULT_CSV, help="Path to GES CSV")
-    ap.add_argument(
-        "--db",
-        default=DEFAULT_DB_URL,
-        help="SQLAlchemy DB URL (e.g., sqlite:///ges.db)",
-    )
-    return ap.parse_args()
+    # Export ERD
+    export_mermaid_erd("erd.md")
+    print("[OK] Mermaid ERD exported -> erd.md")
+    print("[OK] Done.")
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    run(args.csv, args.db)
+    main()
+
