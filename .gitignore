@@ -82,15 +82,30 @@ cython_debug/
 .idea/
 .vscode/
 
-# --- 项目生成物 ---
-# SQLite（由脚本生成，通常不提交）
+# --- 数据库/二进制 ---
+# 忽略所有 SQLite/DB 文件；如需提交示例库，可在下方取消注释例外
+*.db
 ges.db
 ges_sqlite.db
+# !data/example.db
 
-# 输出产物（如不想提交，取消注释）
+# --- 输出产物（按需启用） ---
+# 若不想提交 EDA/可视化大文件，取消以下注释
 # eda_output/
 # prep_output/
+# prep_output/**/*.csv
+# prep_output/**/*.png
+# 保留 ERD（如果未来导出到 prep_output，可用如下例外）
+# !prep_output/**/*.md
 
-# OS / 杂项
-*.vsix
+# 审计产物（建议不提交体积大的中间表；若要提交证据，可保留 CSV）
+# audit_gross_lt_basic.csv
+
+# --- 操作系统杂项 ---
 .DS_Store
+Thumbs.db
+desktop.ini
+
+# --- VS Code 插件包等 ---
+*.vsix
+
