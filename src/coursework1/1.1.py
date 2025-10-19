@@ -1,18 +1,22 @@
 from __future__ import annotations
-import sys
+import argparse
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
 
 # ========= Config =========
-DEFAULT_FILE_PATH = r"C:/Users/30769/Desktop/comp0035-cw-Lychooo/7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv"
+# Default CSV path: repository root (override via --csv)
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent.parent
+DEFAULT_FILE_PATH = REPO_ROOT / "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv"
+
 OUTPUT_DIR = Path("./eda_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ========= Helper Functions =========
 def save_table(df: pd.DataFrame, name: str) -> None:
-    """Save a table both to CSV and Markdown for easy report inclusion."""
+    """Save a table to CSV and Markdown for easy report inclusion."""
     df.to_csv(OUTPUT_DIR / f"{name}.csv", index=True)
     with open(OUTPUT_DIR / f"{name}.md", "w", encoding="utf-8") as f:
         f.write(df.to_markdown())
@@ -28,7 +32,7 @@ def coerce_numeric(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 
 
 def hist(df: pd.DataFrame, col: str, title: str, xlabel: str) -> None:
-    """Plot histogram of a numeric column."""
+    """Plot a histogram of a numeric column."""
     if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
         ax = df[col].plot(kind="hist", bins=20, title=title)
         ax.set_xlabel(xlabel)
@@ -43,12 +47,12 @@ def box_by(df: pd.DataFrame, col: str, by_col: str, title: str, ylabel: str) -> 
     if col in df.columns and by_col in df.columns:
         ax = df.boxplot(column=col, by=by_col, rot=45)
         plt.title(title)
-        plt.suptitle("")  # 移除自动子标题
+        plt.suptitle("")  # remove auto suptitle
         plt.ylabel(ylabel)
-        fig = ax.get_figure()  # ✅ 通过 ax 拿到 figure 对象
+        fig = ax.get_figure()
         fig.tight_layout()
         fig.savefig(OUTPUT_DIR / f"box_{col}_by_{by_col}.png", dpi=150)
-        plt.close(fig)  # ✅ 只关闭这张图
+        plt.close(fig)
 
 
 def trend_over_time(
@@ -89,14 +93,18 @@ def trend_over_time(
 
 # ========= Main Workflow =========
 def main() -> None:
-    # ---- 1) Load ----
-    file_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_FILE_PATH
+    # 1) Load
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--csv", default=str(DEFAULT_FILE_PATH), help="Input CSV file")
+    args = parser.parse_args()
+    file_path = args.csv
+
     try:
         df = pd.read_csv(file_path, encoding="utf-8-sig")
     except UnicodeDecodeError:
         df = pd.read_csv(file_path)
 
-    # ---- 2) Basic structure ----
+    # 2) Basic structure
     n_rows, n_cols = df.shape
     dtypes = df.dtypes.astype(str)
     overview = pd.DataFrame(
@@ -112,7 +120,7 @@ def main() -> None:
     save_table(overview, "00_overview")
     save_table(pd.DataFrame({"dtype": dtypes}), "01_dtypes")
 
-    # ---- 3) Missing & duplicates ----
+    # 3) Missing & duplicates
     save_table(
         df.isnull().sum().sort_values(ascending=False).to_frame("missing_count"),
         "02_missing_by_column",
@@ -122,7 +130,7 @@ def main() -> None:
         "02b_duplicated_rows",
     )
 
-    # ---- 4) Descriptive statistics ----
+    # 4) Descriptive statistics
     save_table(df.describe().transpose(), "03_describe_numeric")
     save_table(df.describe(include="all").transpose(), "04_describe_all")
     save_table(
@@ -130,7 +138,7 @@ def main() -> None:
         "05_nunique_by_column",
     )
 
-    # ---- 5) Convert likely numeric columns ----
+    # 5) Convert likely numeric columns
     likely_numeric = [
         "employment_rate_overall",
         "employment_rate_ft_perm",
@@ -142,7 +150,7 @@ def main() -> None:
     ]
     df_num = coerce_numeric(df, likely_numeric)
 
-    # ---- 6) Distributions ----
+    # 6) Distributions
     hist(
         df_num,
         "employment_rate_overall",
@@ -168,7 +176,7 @@ def main() -> None:
         "Salary (SGD)",
     )
 
-    # ---- 7) Boxplots by University ----
+    # 7) Boxplots by University
     box_by(
         df_num,
         "employment_rate_overall",
@@ -184,7 +192,7 @@ def main() -> None:
         "Salary (SGD)",
     )
 
-    # ---- 8) Trend (Line) Charts ----
+    # 8) Trend (Line) Charts
     trend_over_time(
         df_num, "gross_monthly_median", "year", agg="median", title_prefix="Median"
     )
@@ -195,7 +203,7 @@ def main() -> None:
         df_num, "employment_rate_overall", "year", agg="median", title_prefix="Median"
     )
 
-    # ---- 9) Simple anomaly checks ----
+    # 9) Simple anomaly checks
     anomalies = {}
     if "employment_rate_overall" in df_num.columns:
         anomalies["employment_rate_overall_out_of_range"] = df_num[
@@ -217,13 +225,15 @@ def main() -> None:
         if not sub.empty:
             save_table(sub, f"06_anomaly_{name}")
 
-    # ---- 10) Top-10 frequencies for categorical columns ----
+    # 10) Top-10 frequencies for categorical columns
+    # Use select_dtypes to detect numeric columns; treat the rest as categorical
+    num_cols = df_num.select_dtypes(include="number").columns
     for col in df.columns:
-        if not pd.api.types.is_numeric_dtype(df_num.get(col, pd.Series(dtype=float))):
-            vc = df[col].value_counts(dropna=False).head(10)
+        if col not in num_cols:
+            vc = df[col].astype("string").value_counts(dropna=False).head(10)
             save_table(vc.to_frame(name="count"), f"07_top10_freq_{col}")
 
-    # ---- Done ----
+    # Done
     print("✅ Section 1.1 EDA completed.")
     print(f"   - Input : {file_path}")
     print(f"   - Output: {OUTPUT_DIR.resolve()}")

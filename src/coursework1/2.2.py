@@ -1,15 +1,20 @@
 from __future__ import annotations
+import argparse
 import sqlite3
 from pathlib import Path
 import pandas as pd
 
 # ======== Config ========
-CSV_PATH = r"C:\Users\30769\Desktop\comp0035-cw-Lychooo\7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv"
-DB_PATH = Path("ges_sqlite.db")  # 本节专用数据库（不覆盖 2.1 的 ges.db）
+# Default paths: repository root; can be overridden via CLI args
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent.parent
+DEFAULT_CSV = REPO_ROOT / "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv"
+DEFAULT_DB = REPO_ROOT / "ges_sqlite.db"
+
 OUT_DIR = Path("prep_output")
 OUT_DIR.mkdir(exist_ok=True, parents=True)
 
-# 违反 gross>=basic 的处理策略： "clamp"（把 gross 调到 basic） / "drop"（丢弃）
+# Handling strategy for rows violating gross >= basic: "clamp" or "drop"
 GROSS_BASIC_STRATEGY = "clamp"
 
 # ======== Schema (SQLite DDL) ========
@@ -60,7 +65,7 @@ CREATE TABLE survey_result (
     CONSTRAINT fk_res_year FOREIGN KEY (year_id)
         REFERENCES survey_year(year_id)
         ON DELETE CASCADE,
-    -- 业务约束
+    -- business checks
     CONSTRAINT ck_emp_overall CHECK (
         employment_rate_overall IS NULL OR
         (employment_rate_overall >= 0 AND employment_rate_overall <= 100)
@@ -86,7 +91,7 @@ CREATE TABLE survey_result (
     )
 );
 
--- 索引
+-- indexes
 CREATE INDEX ix_programme_university ON programme(university_id);
 CREATE INDEX ix_year_year ON survey_year(year);
 CREATE INDEX ix_result_prog_year ON survey_result(programme_id, year_id);
@@ -101,12 +106,13 @@ def create_schema(conn: sqlite3.Connection) -> None:
 def read_and_prepare(csv_path: str) -> pd.DataFrame:
     df = pd.read_csv(csv_path, encoding="utf-8-sig")
     df.columns = [c.strip().lower() for c in df.columns]
-    # 标准化关键文本
+
+    # normalize key text columns
     for c in ["university", "degree"]:
         if c in df.columns:
             df[c] = df[c].astype(str).str.strip()
 
-    # 转数值
+    # to numeric
     num_cols = [
         "employment_rate_overall",
         "employment_rate_ft_perm",
@@ -120,7 +126,7 @@ def read_and_prepare(csv_path: str) -> pd.DataFrame:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # 只保留必要列；主键字段不缺失
+    # keep only needed columns; primary key drivers must be present
     needed = {
         "university",
         "degree",
@@ -135,7 +141,8 @@ def read_and_prepare(csv_path: str) -> pd.DataFrame:
     df = df[[c for c in df.columns if c in needed]].dropna(
         subset=["university", "degree", "year"]
     )
-    # 合理范围软过滤
+
+    # reasonable ranges
     df = df[df["year"].between(2000, 2100)]
     for col in ["employment_rate_overall", "employment_rate_ft_perm"]:
         if col in df.columns:
@@ -149,7 +156,7 @@ def read_and_prepare(csv_path: str) -> pd.DataFrame:
         if col in df.columns:
             df = df[(df[col].isna()) | (df[col] >= 0)]
 
-    # 处理 gross < basic
+    # handle gross < basic (audit + clamp/drop)
     EPS = 1e-6
     mask_mean = (
         df["gross_monthly_mean"].notna()
@@ -183,6 +190,7 @@ def read_and_prepare(csv_path: str) -> pd.DataFrame:
 
 def upsert_dim_tables(conn: sqlite3.Connection, df: pd.DataFrame) -> None:
     cur = conn.cursor()
+
     # university
     unis = sorted(df["university"].dropna().unique().tolist())
     cur.executemany(
@@ -195,10 +203,8 @@ def upsert_dim_tables(conn: sqlite3.Connection, df: pd.DataFrame) -> None:
         "INSERT OR IGNORE INTO survey_year(year) VALUES (?)", [(y,) for y in years]
     )
 
-    # programme（依赖 university）
-    # 先查 map
+    # programme (depends on university)
     uni_map = dict(cur.execute("SELECT name, university_id FROM university").fetchall())
-    # 组合 (university_id, degree_name)
     prows = []
     for _, r in df[["university", "degree"]].drop_duplicates().iterrows():
         u_id = uni_map.get(str(r["university"]))
@@ -212,19 +218,18 @@ def upsert_dim_tables(conn: sqlite3.Connection, df: pd.DataFrame) -> None:
 
 def load_fact_table(conn: sqlite3.Connection, df: pd.DataFrame) -> None:
     cur = conn.cursor()
-    # 外键映射
+    # FK mappings
     uni_map = dict(cur.execute("SELECT name, university_id FROM university").fetchall())
     prog_map = dict(
         cur.execute(
             """
-        SELECT p.university_id || '||' || p.name, p.programme_id
-        FROM programme p
-    """
+            SELECT p.university_id || '||' || p.name, p.programme_id
+            FROM programme p
+        """
         ).fetchall()
     )
     year_map = dict(cur.execute("SELECT year, year_id FROM survey_year").fetchall())
 
-    # 批量准备
     rows = []
     for _, r in df.iterrows():
         u_id = uni_map.get(str(r["university"]))
@@ -254,39 +259,47 @@ def load_fact_table(conn: sqlite3.Connection, df: pd.DataFrame) -> None:
             basic_monthly_mean, basic_monthly_median,
             gross_monthly_mean, gross_monthly_median
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """,
+        """,
         rows,
     )
     conn.commit()
 
 
-def main():
-    if DB_PATH.exists():
-        DB_PATH.unlink()  # 可重复执行
-    conn = sqlite3.connect(DB_PATH)
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--csv", default=str(DEFAULT_CSV), help="Input CSV path")
+    ap.add_argument("--db", default=str(DEFAULT_DB), help="SQLite DB path to create")
+    args = ap.parse_args()
+
+    db_path = Path(args.db)
+    if db_path.exists():
+        db_path.unlink()  # reproducible rebuild
+
+    conn = sqlite3.connect(db_path)
     try:
         create_schema(conn)
-        df = read_and_prepare(CSV_PATH)
+        df = read_and_prepare(args.csv)
         upsert_dim_tables(conn, df)
         load_fact_table(conn, df)
-        # 可选：创建只读视图便于 2.3/报告使用
+
+        # Optional: convenience read-only view for queries/report
         conn.executescript(
             """
-        DROP VIEW IF EXISTS v_result;
-        CREATE VIEW v_result AS
-        SELECT u.name AS university, p.name AS degree, y.year,
-               employment_rate_overall, employment_rate_ft_perm,
-               basic_monthly_mean, basic_monthly_median,
-               gross_monthly_mean, gross_monthly_median
-        FROM survey_result sr
-        JOIN programme p ON p.programme_id = sr.programme_id
-        JOIN university u ON u.university_id = p.university_id
-        JOIN survey_year y ON y.year_id = sr.year_id;
-        """
+            DROP VIEW IF EXISTS v_result;
+            CREATE VIEW v_result AS
+            SELECT u.name AS university, p.name AS degree, y.year,
+                   employment_rate_overall, employment_rate_ft_perm,
+                   basic_monthly_mean, basic_monthly_median,
+                   gross_monthly_mean, gross_monthly_median
+            FROM survey_result sr
+            JOIN programme p ON p.programme_id = sr.programme_id
+            JOIN university u ON u.university_id = p.university_id
+            JOIN survey_year y ON y.year_id = sr.year_id;
+            """
         )
         conn.commit()
 
-        # 输出行数统计（便于写进报告）
+        # Row counts (for report)
         cur = conn.cursor()
         n_uni = cur.execute("SELECT COUNT(*) FROM university").fetchone()[0]
         n_prog = cur.execute("SELECT COUNT(*) FROM programme").fetchone()[0]
@@ -294,7 +307,7 @@ def main():
         n_res = cur.execute("SELECT COUNT(*) FROM survey_result").fetchone()[0]
 
         print("✅ Section 2.2 done.")
-        print(f"   - DB: {DB_PATH.resolve()}")
+        print(f"   - DB: {db_path.resolve()}")
         print(
             f"   - Tables -> university: {n_uni}, programme: {n_prog}, survey_year: {n_year}, survey_result: {n_res}"
         )
@@ -305,3 +318,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

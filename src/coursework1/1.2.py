@@ -1,11 +1,15 @@
 from __future__ import annotations
-import sys
+import argparse
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
 
 # ================== Config ==================
-DEFAULT_FILE_PATH = r"C:/Users/30769/Desktop/comp0035-cw-Lychooo/7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv"
+# Default CSV path: repository root (override via --csv)
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent.parent
+DEFAULT_FILE_PATH = REPO_ROOT / "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv"
+
 OUTPUT_DIR = Path("./prep_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -68,9 +72,11 @@ def clean_base(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def latest_year(df: pd.DataFrame) -> int | None:
+    """Return the latest reasonable survey year (bounded to 2000–2100)."""
     if "year" not in df.columns:
         return None
     yrs = pd.to_numeric(df["year"], errors="coerce").dropna().astype(int)
+    yrs = yrs[(yrs >= 2000) & (yrs <= 2100)]
     return int(yrs.max()) if not yrs.empty else None
 
 
@@ -201,7 +207,11 @@ def q3_plot(scatter_df: pd.DataFrame, ly: int) -> None:
 
 # ================== Main ==================
 def main() -> None:
-    file_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_FILE_PATH
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--csv", default=str(DEFAULT_FILE_PATH), help="Input CSV file")
+    args = parser.parse_args()
+    file_path = args.csv
+
     try:
         df = pd.read_csv(file_path, encoding="utf-8-sig")
     except UnicodeDecodeError:
@@ -209,7 +219,7 @@ def main() -> None:
 
     # 0) generic cleaning for all questions
     dfc = clean_base(df)
-    save_table(dfc.head(10), "00_clean_preview_head")  # just to show cleaned structure
+    save_table(dfc.head(10), "00_clean_preview_head")  # show cleaned structure
 
     # Q1
     grp, ly = q1_prepare(dfc)
@@ -231,3 +241,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
