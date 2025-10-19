@@ -31,12 +31,25 @@ from typing import Optional, Tuple, Dict, List
 
 import pandas as pd
 from sqlalchemy import (
-    create_engine, event, Integer, String, Numeric, CheckConstraint, ForeignKey,
-    UniqueConstraint, Index
+    create_engine,
+    event,
+    Integer,
+    String,
+    Numeric,
+    CheckConstraint,
+    ForeignKey,
+    UniqueConstraint,
+    Index,
 )
 from sqlalchemy.orm import (
-    DeclarativeBase, Mapped, mapped_column, relationship, Session, sessionmaker
+    DeclarativeBase,
+    Mapped,
+    mapped_column,
+    relationship,
+    Session,
+    sessionmaker,
 )
+
 
 # ----------------------------
 # SQLAlchemy base & engine
@@ -49,11 +62,13 @@ def build_engine(db_url: str):
     """Create engine and enable PRAGMA foreign_keys=ON for SQLite."""
     engine = create_engine(db_url, echo=False, future=True)
     if engine.url.get_backend_name() == "sqlite":
+
         @event.listens_for(engine, "connect")
         def _set_sqlite_pragma(dbapi_connection, connection_record):
             cur = dbapi_connection.cursor()
             cur.execute("PRAGMA foreign_keys=ON;")
             cur.close()
+
     return engine
 
 
@@ -97,7 +112,9 @@ class SurveyYear(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     year: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
 
-    __table_args__ = (CheckConstraint("year BETWEEN 2000 AND 2100", name="ck_year_range"),)
+    __table_args__ = (
+        CheckConstraint("year BETWEEN 2000 AND 2100", name="ck_year_range"),
+    )
 
     results: Mapped[List["SurveyResult"]] = relationship(
         back_populates="year", cascade="all, delete-orphan"
@@ -208,12 +225,18 @@ def parse_dataframe(df: pd.DataFrame) -> list[Row]:
     if isinstance(school, str):  # both missing
         df2["programme"] = degree if degree is not None else ""
     else:
-        df2["programme"] = (school.fillna("") + " - " + degree.fillna("")).str.strip(" -")
+        df2["programme"] = (school.fillna("") + " - " + degree.fillna("")).str.strip(
+            " -"
+        )
 
     required = [
-        "university", "programme", "year",
-        "employment_overall", "employment_ft_perm",
-        "basic_monthly_median", "gross_monthly_median",
+        "university",
+        "programme",
+        "year",
+        "employment_overall",
+        "employment_ft_perm",
+        "basic_monthly_median",
+        "gross_monthly_median",
     ]
     missing = [c for c in required if c not in df2.columns]
     if missing:
@@ -252,11 +275,7 @@ def get_or_create_university(sess: Session, name: str) -> University:
 
 
 def get_or_create_programme(sess: Session, uni_id: int, name: str) -> Programme:
-    obj = (
-        sess.query(Programme)
-        .filter_by(university_id=uni_id, name=name)
-        .one_or_none()
-    )
+    obj = sess.query(Programme).filter_by(university_id=uni_id, name=name).one_or_none()
     if obj:
         return obj
     obj = Programme(university_id=uni_id, name=name)
@@ -283,7 +302,8 @@ def upsert_result(sess: Session, prog_id: int, year_id: int, r: Row):
     )
     if obj is None:
         obj = SurveyResult(
-            programme_id=prog_id, year_id=year_id,
+            programme_id=prog_id,
+            year_id=year_id,
             employment_overall=r.emp_overall,
             employment_ft_perm=r.emp_ft_perm,
             basic_monthly_median=r.basic_median,
@@ -349,20 +369,22 @@ def main():
     # Default paths relative to repo root
     script_dir = os.path.dirname(os.path.abspath(__file__))
     repo_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
-    default_csv = os.path.join(repo_root, "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv")
+    default_csv = os.path.join(
+        repo_root, "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv"
+    )
     default_db = os.path.join(repo_root, "ges.db")
 
     ap.add_argument(
         "--csv",
         required=False,
         default=default_csv,
-        help=f"Input CSV file (default: {default_csv})"
+        help=f"Input CSV file (default: {default_csv})",
     )
     ap.add_argument(
         "--db",
         required=False,
         default=default_db,
-        help=f"SQLite DB file path (default: {default_db})"
+        help=f"SQLite DB file path (default: {default_db})",
     )
     ap.add_argument("--reset", action="store_true", help="Drop & recreate schema")
 
@@ -411,13 +433,15 @@ def main():
             bm = r.basic_median
             gm = r.gross_median
             if (bm is not None) and (gm is not None) and (gm < bm):
-                audit_rows.append({
-                    "university": r.university,
-                    "programme": r.programme,
-                    "year": r.year,
-                    "gross_before": gm,
-                    "basic": bm,
-                })
+                audit_rows.append(
+                    {
+                        "university": r.university,
+                        "programme": r.programme,
+                        "year": r.year,
+                        "gross_before": gm,
+                        "basic": bm,
+                    }
+                )
                 r = Row(
                     university=r.university,
                     programme=r.programme,
@@ -425,7 +449,7 @@ def main():
                     emp_overall=r.emp_overall,
                     emp_ft_perm=r.emp_ft_perm,
                     basic_median=bm,
-                    gross_median=bm,   # clamp here
+                    gross_median=bm,  # clamp here
                 )
             # -------------------------------
 
@@ -434,7 +458,9 @@ def main():
     # audit export
     if audit_rows:
         pd.DataFrame(audit_rows).to_csv("audit_gross_lt_basic.csv", index=False)
-        print(f"[AUDIT] gross < basic rows: {len(audit_rows)} -> audit_gross_lt_basic.csv")
+        print(
+            f"[AUDIT] gross < basic rows: {len(audit_rows)} -> audit_gross_lt_basic.csv"
+        )
     else:
         print("[AUDIT] gross < basic rows: 0")
 
@@ -453,4 +479,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
