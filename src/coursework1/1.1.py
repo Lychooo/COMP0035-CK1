@@ -63,9 +63,7 @@ def box_by(df: pd.DataFrame, col: str, by_col: str, title: str, ylabel: str) -> 
         plt.xticks(rotation=30, ha="right")
         fig = ax.get_figure()
         fig.tight_layout()
-        fig.savefig(
-            OUTPUT_DIR / f"box_{col}_by_{by_col}.png", dpi=150, bbox_inches="tight"
-        )
+        fig.savefig(OUTPUT_DIR / f"box_{col}_by_{by_col}.png", dpi=150, bbox_inches="tight")
         plt.close(fig)
 
 
@@ -228,13 +226,11 @@ def main() -> None:
     anomalies = {}
     if "employment_rate_overall" in df_num.columns:
         anomalies["employment_rate_overall_out_of_range"] = df_num[
-            (df_num["employment_rate_overall"] < 0)
-            | (df_num["employment_rate_overall"] > 100)
+            (df_num["employment_rate_overall"] < 0) | (df_num["employment_rate_overall"] > 100)
         ]
     if "employment_rate_ft_perm" in df_num.columns:
         anomalies["employment_rate_ft_perm_out_of_range"] = df_num[
-            (df_num["employment_rate_ft_perm"] < 0)
-            | (df_num["employment_rate_ft_perm"] > 100)
+            (df_num["employment_rate_ft_perm"] < 0) | (df_num["employment_rate_ft_perm"] > 100)
         ]
     bad_salary_cols = [
         c for c in ["basic_monthly_mean", "gross_monthly_mean"] if c in df_num.columns

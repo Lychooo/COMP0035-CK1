@@ -54,12 +54,8 @@ def build_engine(db_url: str):
 class DimUniversity(Base):
     __tablename__ = "dim_university"
 
-    university_id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True
-    )
-    university_name: Mapped[str] = mapped_column(
-        String(200), unique=True, nullable=False
-    )
+    university_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    university_name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     country: Mapped[Optional[str]] = mapped_column(String(100))
     region: Mapped[Optional[str]] = mapped_column(String(100))
 
@@ -71,9 +67,7 @@ class DimUniversity(Base):
 class DimSchool(Base):
     __tablename__ = "dim_school"
 
-    school_id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True
-    )
+    school_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     school_name: Mapped[str] = mapped_column(String(200), nullable=False)
     university_id: Mapped[int] = mapped_column(
         ForeignKey("dim_university.university_id", ondelete="CASCADE"),
@@ -95,9 +89,7 @@ class DimSchool(Base):
 class DimDegree(Base):
     __tablename__ = "dim_degree"
 
-    degree_id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True
-    )
+    degree_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     degree_name: Mapped[str] = mapped_column(String(200), nullable=False)
     school_id: Mapped[int] = mapped_column(
         ForeignKey("dim_school.school_id", ondelete="CASCADE"),
@@ -122,9 +114,7 @@ class SurveyYear(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     year: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
 
-    __table_args__ = (
-        CheckConstraint("year BETWEEN 2000 AND 2100", name="ck_year_range"),
-    )
+    __table_args__ = (CheckConstraint("year BETWEEN 2000 AND 2100", name="ck_year_range"),)
 
     facts: Mapped[List["FactEmployment"]] = relationship(
         back_populates="year", cascade="all, delete-orphan"
@@ -134,9 +124,7 @@ class SurveyYear(Base):
 class FactEmployment(Base):
     __tablename__ = "fact_employment"
 
-    record_id: Mapped[int] = mapped_column(
-        Integer, primary_key=True, autoincrement=True
-    )
+    record_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     degree_id: Mapped[int] = mapped_column(
         ForeignKey("dim_degree.degree_id", ondelete="CASCADE"),
@@ -307,9 +295,7 @@ def get_or_create_university(sess: Session, name: str) -> DimUniversity:
 
 def get_or_create_school(sess: Session, uni_id: int, school_name: str) -> DimSchool:
     obj = (
-        sess.query(DimSchool)
-        .filter_by(university_id=uni_id, school_name=school_name)
-        .one_or_none()
+        sess.query(DimSchool).filter_by(university_id=uni_id, school_name=school_name).one_or_none()
     )
     if obj:
         return obj
@@ -321,9 +307,7 @@ def get_or_create_school(sess: Session, uni_id: int, school_name: str) -> DimSch
 
 def get_or_create_degree(sess: Session, school_id: int, degree_name: str) -> DimDegree:
     obj = (
-        sess.query(DimDegree)
-        .filter_by(school_id=school_id, degree_name=degree_name)
-        .one_or_none()
+        sess.query(DimDegree).filter_by(school_id=school_id, degree_name=degree_name).one_or_none()
     )
     if obj:
         return obj
@@ -344,11 +328,7 @@ def get_or_create_year(sess: Session, year: int) -> SurveyYear:
 
 
 def upsert_fact(sess: Session, degree_id: int, year_id: int, r: Row) -> None:
-    obj = (
-        sess.query(FactEmployment)
-        .filter_by(degree_id=degree_id, year_id=year_id)
-        .one_or_none()
-    )
+    obj = sess.query(FactEmployment).filter_by(degree_id=degree_id, year_id=year_id).one_or_none()
     if obj is None:
         obj = FactEmployment(
             degree_id=degree_id,
@@ -428,9 +408,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Section 2.1 – 3NF DB build & load")
     script_dir = os.path.dirname(os.path.abspath(__file__))
     repo_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
-    default_csv = os.path.join(
-        repo_root, "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv"
-    )
+    default_csv = os.path.join(repo_root, "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv")
     default_db = os.path.join(repo_root, "ges.db")
 
     ap.add_argument("--csv", default=default_csv, help="Input CSV")
@@ -505,9 +483,7 @@ def main() -> None:
 
     if audit_rows:
         pd.DataFrame(audit_rows).to_csv("audit_gross_lt_basic.csv", index=False)
-        print(
-            f"[AUDIT] gross < basic rows: {len(audit_rows)} -> audit_gross_lt_basic.csv"
-        )
+        print(f"[AUDIT] gross < basic rows: {len(audit_rows)} -> audit_gross_lt_basic.csv")
     else:
         print("[AUDIT] gross < basic rows: 0")
 
@@ -517,9 +493,7 @@ def main() -> None:
         n_d = sess.query(DimDegree).count()
         n_y = sess.query(SurveyYear).count()
         n_f = sess.query(FactEmployment).count()
-    print(
-        f"[COUNTS] university={n_u}, school={n_s}, degree={n_d}, year={n_y}, facts={n_f}"
-    )
+    print(f"[COUNTS] university={n_u}, school={n_s}, degree={n_d}, year={n_y}, facts={n_f}")
 
     export_mermaid_erd("erd.md")
     print("[OK] Mermaid ERD exported -> erd.md")

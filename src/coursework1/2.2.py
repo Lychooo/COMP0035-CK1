@@ -138,9 +138,7 @@ def read_and_prepare(csv_path: str) -> pd.DataFrame:
         "gross_monthly_mean",
         "gross_monthly_median",
     }
-    df = df[[c for c in df.columns if c in needed]].dropna(
-        subset=["university", "degree", "year"]
-    )
+    df = df[[c for c in df.columns if c in needed]].dropna(subset=["university", "degree", "year"])
 
     # reasonable ranges
     df = df[df["year"].between(2000, 2100)]
@@ -172,13 +170,9 @@ def read_and_prepare(csv_path: str) -> pd.DataFrame:
     if bad_mask.any():
         audit = OUT_DIR / "2.2_anomaly_gross_lt_basic.csv"
         df.loc[bad_mask].to_csv(audit, index=False, encoding="utf-8-sig")
-        print(
-            f"[audit] gross<basic rows saved to {audit.resolve()}  rows={int(bad_mask.sum())}"
-        )
+        print(f"[audit] gross<basic rows saved to {audit.resolve()}  rows={int(bad_mask.sum())}")
         if GROSS_BASIC_STRATEGY.lower() == "clamp":
-            df.loc[mask_mean, "gross_monthly_mean"] = df.loc[
-                mask_mean, "basic_monthly_mean"
-            ]
+            df.loc[mask_mean, "gross_monthly_mean"] = df.loc[mask_mean, "basic_monthly_mean"]
             df.loc[mask_median, "gross_monthly_median"] = df.loc[
                 mask_median, "basic_monthly_median"
             ]
@@ -193,15 +187,11 @@ def upsert_dim_tables(conn: sqlite3.Connection, df: pd.DataFrame) -> None:
 
     # university
     unis = sorted(df["university"].dropna().unique().tolist())
-    cur.executemany(
-        "INSERT OR IGNORE INTO university(name) VALUES (?)", [(u,) for u in unis]
-    )
+    cur.executemany("INSERT OR IGNORE INTO university(name) VALUES (?)", [(u,) for u in unis])
 
     # survey_year
     years = sorted(df["year"].dropna().astype(int).unique().tolist())
-    cur.executemany(
-        "INSERT OR IGNORE INTO survey_year(year) VALUES (?)", [(y,) for y in years]
-    )
+    cur.executemany("INSERT OR IGNORE INTO survey_year(year) VALUES (?)", [(y,) for y in years])
 
     # programme (depends on university)
     uni_map = dict(cur.execute("SELECT name, university_id FROM university").fetchall())
@@ -210,9 +200,7 @@ def upsert_dim_tables(conn: sqlite3.Connection, df: pd.DataFrame) -> None:
         u_id = uni_map.get(str(r["university"]))
         if u_id is not None:
             prows.append((u_id, str(r["degree"])))
-    cur.executemany(
-        "INSERT OR IGNORE INTO programme(university_id, name) VALUES (?, ?)", prows
-    )
+    cur.executemany("INSERT OR IGNORE INTO programme(university_id, name) VALUES (?, ?)", prows)
     conn.commit()
 
 
