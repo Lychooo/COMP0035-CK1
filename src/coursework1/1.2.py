@@ -71,7 +71,7 @@ def clean_base(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def latest_year(df: pd.DataFrame) -> int | None:
-    """Return the latest reasonable survey year (bounded to 2000–2100)."""
+    """Return the latest reasonable survey year (bounded to 2000�?100)."""
     if "year" not in df.columns:
         return None
     yrs = pd.to_numeric(df["year"], errors="coerce").dropna().astype(int)
@@ -249,7 +249,7 @@ def main() -> None:
     scat, ly2 = q3_prepare(dfc)
     q3_plot(scat, ly2)
 
-    print("✅ Section 1.2 Data preparation finished.")
+    print("✅Section 1.2 Data preparation finished.")
     print(f"   Input : {file_path}")
     print(f"   Output: {OUTPUT_DIR.resolve()}")
     print("   Artifacts: Q1 tables/bars, Q2 trend lines, Q3 scatter + describe")
@@ -257,4 +257,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

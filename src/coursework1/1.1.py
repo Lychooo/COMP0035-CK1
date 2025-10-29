@@ -9,8 +9,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 DEFAULT_FILE_PATH = REPO_ROOT / "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv"
 
-OUTPUT_DIR = Path("./eda_output")
+# Save outputs directly under the main project folder
+OUTPUT_DIR = REPO_ROOT / "eda_output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # ========= Helper Functions =========
 def save_table(df: pd.DataFrame, name: str) -> None:
@@ -93,7 +95,6 @@ def trend_over_time(
         raise ValueError("agg must be 'median' or 'mean'")
 
     ts = ts.sort_index()
-
     ax = ts.plot(kind="line", marker="o", title=f"{title_prefix} {y_col} over time")
     ax.set_xlabel(x_col)
     ax.set_ylabel(y_col.replace("_", " ").title())
