@@ -5,14 +5,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # ================== Config ==================
-# Default CSV path: repository root (override via --csv)
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 DEFAULT_FILE_PATH = REPO_ROOT / "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv"
 
-OUTPUT_DIR = Path("./prep_output")
+OUTPUT_DIR = REPO_ROOT / "prep_output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
 
 # ============== Utilities ==============
 def save_table(df: pd.DataFrame, name: str) -> None:
@@ -29,8 +27,6 @@ def to_num(s: pd.Series) -> pd.Series:
 def clean_base(df: pd.DataFrame) -> pd.DataFrame:
     """Basic cleaning shared by all questions."""
     out = df.copy()
-
-    # Standardize likely numeric columns
     num_cols = [
         "employment_rate_overall",
         "employment_rate_ft_perm",
@@ -44,10 +40,8 @@ def clean_base(df: pd.DataFrame) -> pd.DataFrame:
         if c in out.columns:
             out[c] = to_num(out[c])
 
-    # Drop exact duplicates
     out = out.drop_duplicates()
 
-    # Remove impossible percentages and negative salaries (data quality from 1.1)
     if "employment_rate_overall" in out.columns:
         out = out[
             (out["employment_rate_overall"] >= 0)
@@ -67,7 +61,6 @@ def clean_base(df: pd.DataFrame) -> pd.DataFrame:
     ]:
         if sc in out.columns:
             out = out[out[sc].isna() | (out[sc] >= 0)]
-
     return out
 
 
@@ -85,76 +78,71 @@ def ensure_not_empty(df: pd.DataFrame, label: str) -> None:
         raise ValueError(f"No data available for {label} after cleaning/selection.")
 
 
-# ============== Q1: Latest year, university ranking (bar plots) ==============
+# ============== Q1: Compare programmes (median salary & employment rate) ==============
 def q1_prepare(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
-    """Prepare latest-year median by university for salary and employment rate."""
+    """Prepare latest-year median by programme for salary and employment rate."""
     ly = latest_year(df)
     if ly is None:
         raise ValueError("No valid 'year' column found.")
     dfy = df[df["year"] == ly].copy()
 
-    # Keep only relevant cols
-    need_cols = ["university", "gross_monthly_median", "employment_rate_overall"]
+    # Choose relevant columns (programmes have stronger variation than universities)
+    need_cols = ["programme_title", "gross_monthly_median", "employment_rate_overall"]
     keep = [c for c in need_cols if c in dfy.columns]
     dfy = dfy[keep].dropna()
 
-    # Aggregate by university (median = robust to outliers)
-    grp = dfy.groupby("university").median(numeric_only=True)
+    # Group by programme (median)
+    grp = dfy.groupby("programme_title").median(numeric_only=True)
 
-    # Save table
+    # Save table (sorted by salary)
     save_table(
         grp.sort_values("gross_monthly_median", ascending=False),
-        f"q1_latest_{ly}_by_university_median",
+        f"q1_latest_{ly}_by_programme_median",
     )
 
     return grp, ly
 
 
 def q1_plot(grp: pd.DataFrame, ly: int) -> None:
-    """Vertical bars with improved label alignment and readability."""
-    # Salary bar
+    """Bar plots for salary and employment rate by programme."""
+    # Limit to top N programmes for readability
+    top_n = 15
     if "gross_monthly_median" in grp.columns:
-        ax = grp.sort_values("gross_monthly_median", ascending=False)[
-            "gross_monthly_median"
-        ].plot(
+        top_salary = grp.sort_values("gross_monthly_median", ascending=False).head(top_n)
+        ax = top_salary["gross_monthly_median"].plot(
             kind="bar",
             figsize=(12, 6),
-            title=f"Median Gross Monthly Salary by University (Latest year {ly})",
-            rot=0,
+            color="skyblue",
+            title=f"Top {top_n} Programmes by Median Gross Monthly Salary (Year {ly})",
         )
-        # right-align, rotate labels slightly to match bars
+        ax.set_xlabel("Programme Title")
+        ax.set_ylabel("Gross Monthly Median (SGD)")
         ax.set_xticklabels(ax.get_xticklabels(), rotation=30, ha="right")
-        ax.set_xlabel("university")
-        ax.set_ylabel("Gross monthly median (SGD)")
-        ax.tick_params(axis="x", pad=6)
         fig = ax.get_figure()
         fig.tight_layout()
         fig.savefig(
-            OUTPUT_DIR / f"q1_bar_salary_latest_{ly}.png",
+            OUTPUT_DIR / f"q1_bar_salary_by_programme_latest_{ly}.png",
             dpi=200,
             bbox_inches="tight",
         )
         plt.close(fig)
 
-    # Employment rate bar
     if "employment_rate_overall" in grp.columns:
-        ax = grp.sort_values("employment_rate_overall", ascending=False)[
-            "employment_rate_overall"
-        ].plot(
+        top_emp = grp.sort_values("employment_rate_overall", ascending=False).head(top_n)
+        ax = top_emp["employment_rate_overall"].plot(
             kind="bar",
             figsize=(12, 6),
-            title=f"Median Employment Rate by University (Latest year {ly})",
-            rot=0,
+            color="lightgreen",
+            title=f"Top {top_n} Programmes by Median Employment Rate (Year {ly})",
         )
+        ax.set_xlabel("Programme Title")
+        ax.set_ylabel("Employment Rate (%)")
         ax.set_xticklabels(ax.get_xticklabels(), rotation=30, ha="right")
-        ax.set_xlabel("university")
-        ax.set_ylabel("Employment rate (%)")
         ax.set_ylim(0, 100)
-        ax.tick_params(axis="x", pad=6)
         fig = ax.get_figure()
         fig.tight_layout()
         fig.savefig(
-            OUTPUT_DIR / f"q1_bar_emp_latest_{ly}.png",
+            OUTPUT_DIR / f"q1_bar_employment_by_programme_latest_{ly}.png",
             dpi=200,
             bbox_inches="tight",
         )
@@ -169,13 +157,12 @@ def q2_prepare(df: pd.DataFrame) -> pd.DataFrame:
     d = df[ok].dropna()
     ensure_not_empty(d, "Q2 raw")
 
-    # group median for stability
     g = (
         d.groupby(["year", "university"])["gross_monthly_median"]
         .median()
         .unstack("university")
     )
-    g = g.sort_index()  # sort by year
+    g = g.sort_index()
     save_table(g, "q2_trend_table_year_univ_salary_median")
     return g
 
@@ -236,7 +223,7 @@ def main() -> None:
 
     # 0) generic cleaning for all questions
     dfc = clean_base(df)
-    save_table(dfc.head(10), "00_clean_preview_head")  # show cleaned structure
+    save_table(dfc.head(10), "00_clean_preview_head")
 
     # Q1
     grp, ly = q1_prepare(dfc)
@@ -258,3 +245,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
