@@ -5,14 +5,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # ========= Config =========
-# Default CSV path: repository root (override via --csv)
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 DEFAULT_FILE_PATH = REPO_ROOT / "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv"
 
 OUTPUT_DIR = Path("./eda_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
 
 # ========= Helper Functions =========
 def save_table(df: pd.DataFrame, name: str) -> None:
@@ -31,27 +29,41 @@ def coerce_numeric(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
     return out
 
 
-def hist(df: pd.DataFrame, col: str, title: str, xlabel: str) -> None:
-    """Plot a histogram of a numeric column."""
-    if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
-        ax = df[col].plot(kind="hist", bins=20, title=title)
-        ax.set_xlabel(xlabel)
-        fig = ax.get_figure()
-        fig.tight_layout()
-        fig.savefig(OUTPUT_DIR / f"hist_{col}.png", dpi=150)
-        plt.close(fig)
+def hist_pair(
+    df: pd.DataFrame,
+    col1: str,
+    col2: str,
+    title1: str,
+    title2: str,
+    xlabel: str,
+    filename: str,
+) -> None:
+    """Plot two histograms side by side for comparison."""
+    if col1 not in df.columns or col2 not in df.columns:
+        return
+    fig, axes = plt.subplots(ncols=2, figsize=(8, 3.2), sharey=True)
+    df[col1].plot(kind="hist", bins=20, ax=axes[0], title=title1)
+    df[col2].plot(kind="hist", bins=20, ax=axes[1], title=title2)
+    axes[0].set_xlabel(xlabel)
+    axes[1].set_xlabel(xlabel)
+    fig.tight_layout()
+    fig.savefig(OUTPUT_DIR / filename, dpi=150)
+    plt.close(fig)
 
 
 def box_by(df: pd.DataFrame, col: str, by_col: str, title: str, ylabel: str) -> None:
     """Create a boxplot grouped by a categorical column."""
     if col in df.columns and by_col in df.columns:
-        ax = df.boxplot(column=col, by=by_col, rot=45)
+        ax = df.boxplot(column=col, by=by_col, rot=30)
         plt.title(title)
         plt.suptitle("")  # remove auto suptitle
         plt.ylabel(ylabel)
+        plt.xticks(rotation=30, ha="right")
         fig = ax.get_figure()
         fig.tight_layout()
-        fig.savefig(OUTPUT_DIR / f"box_{col}_by_{by_col}.png", dpi=150)
+        fig.savefig(
+            OUTPUT_DIR / f"box_{col}_by_{by_col}.png", dpi=150, bbox_inches="tight"
+        )
         plt.close(fig)
 
 
@@ -150,33 +162,36 @@ def main() -> None:
     ]
     df_num = coerce_numeric(df, likely_numeric)
 
-    # 6) Distributions
-    hist(
+    # 6) Paired histograms (no duplicates)
+    hist_pair(
         df_num,
         "employment_rate_overall",
-        "Overall Employment Rate Distribution",
-        "Employment Rate (%)",
-    )
-    hist(
-        df_num,
         "employment_rate_ft_perm",
+        "Overall Employment Rate Distribution",
         "Full-time Permanent Employment Rate Distribution",
         "Employment Rate (%)",
+        "hist_employment_rate_pair.png",
     )
-    hist(
+    hist_pair(
         df_num,
         "basic_monthly_mean",
+        "basic_monthly_median",
         "Basic Monthly Mean Salary Distribution",
+        "Basic Monthly Median Salary Distribution",
         "Salary (SGD)",
+        "hist_basic_salary_pair.png",
     )
-    hist(
+    hist_pair(
         df_num,
         "gross_monthly_mean",
+        "gross_monthly_median",
         "Gross Monthly Mean Salary Distribution",
+        "Gross Monthly Median Salary Distribution",
         "Salary (SGD)",
+        "hist_gross_salary_pair.png",
     )
 
-    # 7) Boxplots by University
+    # 7) Boxplots by University (unique)
     box_by(
         df_num,
         "employment_rate_overall",
@@ -186,21 +201,26 @@ def main() -> None:
     )
     box_by(
         df_num,
-        "basic_monthly_mean",
+        "basic_monthly_median",
         "university",
-        "Basic Monthly Mean Salary by University",
+        "Basic Monthly Median Salary by University",
         "Salary (SGD)",
     )
 
-    # 8) Trend (Line) Charts
+    # 8) Line Charts (Trends)
     trend_over_time(
-        df_num, "gross_monthly_median", "year", agg="median", title_prefix="Median"
+        df_num,
+        "basic_monthly_median",
+        "year",
+        agg="median",
+        title_prefix="Median",
     )
     trend_over_time(
-        df_num, "basic_monthly_median", "year", agg="median", title_prefix="Median"
-    )
-    trend_over_time(
-        df_num, "employment_rate_overall", "year", agg="median", title_prefix="Median"
+        df_num,
+        "employment_rate_overall",
+        "year",
+        agg="median",
+        title_prefix="Median",
     )
 
     # 9) Simple anomaly checks
@@ -226,7 +246,6 @@ def main() -> None:
             save_table(sub, f"06_anomaly_{name}")
 
     # 10) Top-10 frequencies for categorical columns
-    # Use select_dtypes to detect numeric columns; treat the rest as categorical
     num_cols = df_num.select_dtypes(include="number").columns
     for col in df.columns:
         if col not in num_cols:
@@ -238,9 +257,11 @@ def main() -> None:
     print(f"   - Input : {file_path}")
     print(f"   - Output: {OUTPUT_DIR.resolve()}")
     print(
-        "   - Saved: overview/dtypes/missing/duplicates/describe/nunique/hist/box/trend/anomalies/top10-freq"
+        "   - Saved: overview/dtypes/missing/duplicates/describe/nunique/"
+        "hist/box/trend/anomalies/top10-freq"
     )
 
 
 if __name__ == "__main__":
     main()
+
