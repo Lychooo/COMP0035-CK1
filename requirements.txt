@@ -1,4 +1,7 @@
+# === Core libraries used for data analysis and visualization ===
 pandas>=2.2,<3.0
 matplotlib>=3.8,<4.0
-SQLAlchemy>=2.0,<3.0
-tabulate>=0.9
+
+# === Linting and formatting tools for reproducibility (Section 3) ===
+ruff>=0.6.0
+black>=24.0

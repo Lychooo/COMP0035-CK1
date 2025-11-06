@@ -1,36 +1,22 @@
-# Documentation: https://packaging.python.org/en/latest/guides/writing-pyproject-toml/
-
 [build-system]
 requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "comp0035-cw1-Lychooo"          # ← use your group name or student ID
-version = "2025.1"
-description = "COMP0035 Coursework 1 – Graduate Employment Survey Database and EDA"
+name = "comp0035-cw1"
+version = "0.1.1"
+description = "COMP0035 Coursework 1 scripts: EDA, preparation, SQLite database"
 readme = "README.md"
 requires-python = ">=3.10"
 
+# Only libraries actually imported by the code:
 dependencies = [
   "pandas>=2.2,<3.0",
   "matplotlib>=3.8,<4.0",
-  "SQLAlchemy>=2.0,<3.0",
-  "tabulate>=0.9",
+  "tabulate>=0.9"
 ]
 
-[tool.setuptools]
-package-dir = { "" = "src" }
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-# ---- Code Style Tools ----
-[tool.black]
-line-length = 100
-target-version = ['py310']
-
-[tool.ruff]
-line-length = 100
-select = ["E", "F", "W"]
-ignore = ["E203", "E266", "E501"]
+# Notes:
+# - sqlite3, argparse, logging are from the Python standard library and do not belong here.
+# - No packaging of modules or entry points is required for these scripts.
 

@@ -1,38 +1,70 @@
-[![Open in Codespaces](https://classroom.github.com/assets/launch-codespace-2972f46106e565e64193e422d61a12cf1da4916b45550586e14ef0a7c637dd04.svg)](https://classroom.github.com/open-in-codespaces?assignment_repo_id=20779389)
-# COMP0035 coursework repository
-This repository contains the code for:
-- Section 1.1 – Data description & exploration (EDA)
-- Section 1.2 – Data preparation
-- Section 2.1 – Database design (SQLAlchemy ORM)
-- Section 2.2 – Database creation (sqlite3 only)
+# COMP0035 Coursework 1 – Code README
 
-## Environment setup and run instructions (Windows PowerShell)
+This repository provides three Python scripts to (i) explore a CSV dataset, (ii) prepare it, and (iii) build an SQLite database.  
+It documents only what the code actually uses.
 
-Create and activate a virtual environment, then install dependencies:
-    python -m venv .venv
-    .\.venv\Scripts\Activate.ps1
-    python -m pip install --upgrade pip
-    pip install -r requirements.txt
+## Repository Layout
+```
+src/coursework1/
+├─ 1.1.py   # Data description & exploration (EDA)
+├─ 1.2.py   # Data preparation
+└─ db.py    # SQLite database creation (3NF schema + audit)
+```
 
-Note: Sections 1.1 and 1.2 use pandas.DataFrame.to_markdown(), which requires tabulate (already included in requirements.txt).
+## Environment Setup
+```bash
+python -m venv .venv
+. .venv/bin/activate            # macOS/Linux
+# .\.venv\Scripts\Activate.ps1  # Windows PowerShell
 
-Run the scripts (they will read the CSV path configured in each script; change if needed):
-    python src/coursework1/1.1.py
-    python src/coursework1/1.2.py
-    python src/coursework1/2.1.py
-    python src/coursework1/2.2.py
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-Outputs:
-- eda_output/  → Section 1.1 results (tables and plots)
-- prep_output/ → Section 1.2, 2.1, 2.2 results (tables, plots, ERD, anomaly logs)
-- ges.db / ges_sqlite.db → SQLite databases
-- Markdown (.md) and CSV tables are generated for easy report inclusion
+### requirements.txt (used by the code)
+```
+pandas>=2.2,<3.0
+matplotlib>=3.8,<4.0
+tabulate>=0.9
+```
+- `tabulate` is required for `DataFrame.to_markdown()` used by 1.1/1.2.
+- Standard library modules used (no install required): `argparse`, `pathlib`, `logging`, `sqlite3`.
 
-Dependencies (requirements.txt):
-    pandas>=2.2,<3.0
-    matplotlib>=3.8,<4.0
-    SQLAlchemy>=2.0,<3.0
-    tabulate>=0.9
+If Windows PowerShell blocks activation:
+```bash
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
 
-Tested with Python 3.10–3.13. If PowerShell shows permission errors when activating the venv:
-    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+## How to Run
+
+### 1) Section 1.1 – EDA (structure, types, missing values, distributions, trends)
+```bash
+python src/coursework1/1.1.py --csv "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (3).csv"
+```
+**Outputs → `eda_output/`** (auto-created)
+- `00_overview.md/csv`, `01_dtypes.md/csv`, `02_missing_by_column.md/csv`, etc.
+- Plots: `hist_*.png`, `box_*.png`, `trend_*.png`
+
+### 2) Section 1.2 – Data Preparation (cleaning + 3 question-oriented views)
+```bash
+python src/coursework1/1.2.py --csv "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (3).csv"
+```
+**Outputs → `prep_output/`** (auto-created)
+- Cleaned preview/table markdown & csv
+- Plots: `q1_bar_*_latest_<YEAR>.png`, `q2_trend_lines_salary_by_university.png`, `q3_scatter_*.png`
+
+### 3) Section 2 – SQLite Database (3NF schema + audit)
+- Detects a CSV in the working directory containing the word "graduate" **or** use `--csv` explicitly.
+- Writes an audit if `gross_monthly_median < basic_monthly_median` and clamps the inserted value to avoid constraint violations.
+```bash
+python src/coursework1/db.py --csv "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (3).csv" --reset
+```
+**Outputs (in repo root):**
+- `ges_2_1.db` – SQLite database
+- `erd.md` – ER diagram (Mermaid)
+- `audit_gross_lt_basic.csv` – salary anomaly log (only if anomalies exist)
+
+## Notes
+- Default CSV paths in `1.1.py` / `1.2.py` point to the repository root. Use `--csv` to override.
+- `db.py` creates indices and enforces checks (percentages 0..100, non-negative salaries, valid years 2000..2100).
+- All figures are generated with `pandas.DataFrame.plot()`/matplotlib (as used in code).
