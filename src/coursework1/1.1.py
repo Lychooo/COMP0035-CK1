@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 # ========= Config =========
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
-DEFAULT_FILE_PATH = REPO_ROOT / "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv"
+DEFAULT_FILE_PATH = REPO_ROOT / "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (3).csv"
 
 # Save outputs directly under the main project folder
 OUTPUT_DIR = REPO_ROOT / "eda_output"

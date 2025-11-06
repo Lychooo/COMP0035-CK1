@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 # Default CSV path: repository root (override via --csv)
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
-DEFAULT_FILE_PATH = REPO_ROOT / "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv"
+DEFAULT_FILE_PATH = REPO_ROOT / "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (3).csv"
 
 OUTPUT_DIR = Path("./prep_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
