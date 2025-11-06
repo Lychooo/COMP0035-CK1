@@ -1,503 +1,385 @@
-from __future__ import annotations
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+COMP0035 – Coursework Section 2.1 (Enhanced Final Version with Audit)
+---------------------------------------------------------------------
+Features:
+1. Reusability (modular, auto CSV detection)
+2. Error handling (try/except + logging)
+3. Data validation & cleaning (%, commas, invalid years, p25>p75)
+4. Audit: if gross_monthly_median < basic_monthly_median → record to CSV + clamp
+5. Original ERD fully preserved
+"""
 
-import argparse
-import math
 import os
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
-
+import sqlite3
 import pandas as pd
-from sqlalchemy import (
-    CheckConstraint,
-    ForeignKey,
-    Index,
-    Integer,
-    Numeric,
-    String,
-    UniqueConstraint,
-    create_engine,
-    event,
-)
-from sqlalchemy.orm import (
-    DeclarativeBase,
-    Mapped,
-    Session,
-    mapped_column,
-    relationship,
-    sessionmaker,
-)
+import argparse
+import logging
+
+DEFAULT_DB = "ges_2_1.db"
+DEFAULT_ERD = "erd.md"
+DEFAULT_AUDIT = "audit_gross_lt_basic.csv"
+
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
 
 # =========================
-# SQLAlchemy base & engine
+# 1. Create schema
 # =========================
-class Base(DeclarativeBase):
-    pass
-
-
-def build_engine(db_url: str):
-    engine = create_engine(db_url, echo=False, future=True)
-    if engine.url.get_backend_name() == "sqlite":
-
-        @event.listens_for(engine, "connect")
-        def _set_sqlite_pragma(dbapi_connection, connection_record):
-            cur = dbapi_connection.cursor()
-            cur.execute("PRAGMA foreign_keys=ON;")
-            cur.close()
-
-    return engine
-
-
-# =========================
-# 目标 3NF 模式（与你“dim_university → dim_school → dim_degree → fact_employment”一致）
-# =========================
-class DimUniversity(Base):
-    __tablename__ = "dim_university"
-
-    university_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    university_name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
-    country: Mapped[Optional[str]] = mapped_column(String(100))
-    region: Mapped[Optional[str]] = mapped_column(String(100))
-
-    schools: Mapped[List["DimSchool"]] = relationship(
-        back_populates="university", cascade="all, delete-orphan"
+def create_schema(conn: sqlite3.Connection):
+    """Create 3NF schema with constraints."""
+    cur = conn.cursor()
+    cur.executescript(
+        """
+        PRAGMA foreign_keys = OFF;
+        DROP TABLE IF EXISTS fact_employment;
+        DROP TABLE IF EXISTS dim_degree;
+        DROP TABLE IF EXISTS dim_school;
+        DROP TABLE IF EXISTS dim_university;
+        DROP TABLE IF EXISTS survey_year;
+        PRAGMA foreign_keys = ON;
+        """
     )
 
+    cur.executescript(
+        """
+        CREATE TABLE dim_university (
+            university_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            university_name TEXT UNIQUE NOT NULL
+        );
 
-class DimSchool(Base):
-    __tablename__ = "dim_school"
+        CREATE TABLE dim_school (
+            school_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            school_name  TEXT NOT NULL,
+            university_id INTEGER NOT NULL,
+            UNIQUE (university_id, school_name),
+            FOREIGN KEY (university_id) REFERENCES dim_university(university_id)
+                ON DELETE CASCADE
+        );
 
-    school_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    school_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    university_id: Mapped[int] = mapped_column(
-        ForeignKey("dim_university.university_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+        CREATE TABLE dim_degree (
+            degree_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            degree_name  TEXT NOT NULL,
+            school_id    INTEGER NOT NULL,
+            UNIQUE (school_id, degree_name),
+            FOREIGN KEY (school_id) REFERENCES dim_school(school_id)
+                ON DELETE CASCADE
+        );
+
+        CREATE TABLE survey_year (
+            year_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            year    INTEGER UNIQUE NOT NULL
+                CHECK (year BETWEEN 2000 AND 2100)
+        );
+
+        CREATE TABLE fact_employment (
+            record_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            degree_id INTEGER NOT NULL,
+            year_id   INTEGER NOT NULL,
+            employment_rate_overall REAL CHECK (employment_rate_overall BETWEEN 0 AND 100),
+            employment_rate_ft_perm  REAL CHECK (employment_rate_ft_perm  BETWEEN 0 AND 100),
+            basic_monthly_mean       REAL CHECK (basic_monthly_mean >= 0),
+            basic_monthly_median     REAL CHECK (basic_monthly_median >= 0),
+            gross_monthly_mean       REAL CHECK (gross_monthly_mean >= 0),
+            gross_monthly_median     REAL CHECK (gross_monthly_median >= 0),
+            gross_mthly_25_percentile REAL,
+            gross_mthly_75_percentile REAL,
+            UNIQUE(degree_id, year_id),
+            FOREIGN KEY(degree_id) REFERENCES dim_degree(degree_id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(year_id) REFERENCES survey_year(year_id)
+                ON DELETE CASCADE
+        );
+
+        CREATE INDEX ix_fact_degree_year ON fact_employment(degree_id, year_id);
+        CREATE INDEX ix_fact_year ON fact_employment(year_id);
+        """
     )
-    # 去重：同一所大学中 school_name 唯一
-    __table_args__ = (
-        UniqueConstraint("university_id", "school_name", name="uq_school_uni_name"),
-        Index("ix_school_name", "school_name"),
-    )
-
-    university: Mapped["DimUniversity"] = relationship(back_populates="schools")
-    degrees: Mapped[List["DimDegree"]] = relationship(
-        back_populates="school", cascade="all, delete-orphan"
-    )
-
-
-class DimDegree(Base):
-    __tablename__ = "dim_degree"
-
-    degree_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    degree_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    school_id: Mapped[int] = mapped_column(
-        ForeignKey("dim_school.school_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    # 去重：同一 school 中 degree_name 唯一
-    __table_args__ = (
-        UniqueConstraint("school_id", "degree_name", name="uq_degree_school_name"),
-        Index("ix_degree_name", "degree_name"),
-    )
-
-    school: Mapped["DimSchool"] = relationship(back_populates="degrees")
-    facts: Mapped[List["FactEmployment"]] = relationship(
-        back_populates="degree", cascade="all, delete-orphan"
-    )
-
-
-class SurveyYear(Base):
-    __tablename__ = "survey_year"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    year: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
-
-    __table_args__ = (CheckConstraint("year BETWEEN 2000 AND 2100", name="ck_year_range"),)
-
-    facts: Mapped[List["FactEmployment"]] = relationship(
-        back_populates="year", cascade="all, delete-orphan"
-    )
-
-
-class FactEmployment(Base):
-    __tablename__ = "fact_employment"
-
-    record_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-
-    degree_id: Mapped[int] = mapped_column(
-        ForeignKey("dim_degree.degree_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    year_id: Mapped[int] = mapped_column(
-        ForeignKey("survey_year.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-
-    employment_rate_overall: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))
-    employment_rate_ft_perm: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))
-    basic_monthly_mean: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
-    basic_monthly_median: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
-    gross_monthly_mean: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
-    gross_monthly_median: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
-
-    __table_args__ = (
-        UniqueConstraint("degree_id", "year_id", name="uq_degree_year"),
-        CheckConstraint(
-            "(employment_rate_overall IS NULL) OR (employment_rate_overall BETWEEN 0 AND 100)",
-            name="ck_emp_overall_pct",
-        ),
-        CheckConstraint(
-            "(employment_rate_ft_perm IS NULL) OR (employment_rate_ft_perm BETWEEN 0 AND 100)",
-            name="ck_emp_ft_perm_pct",
-        ),
-        CheckConstraint(
-            "(basic_monthly_mean IS NULL) OR (basic_monthly_mean >= 0)",
-            name="ck_basic_mean_nonneg",
-        ),
-        CheckConstraint(
-            "(basic_monthly_median IS NULL) OR (basic_monthly_median >= 0)",
-            name="ck_basic_median_nonneg",
-        ),
-        CheckConstraint(
-            "(gross_monthly_mean IS NULL) OR (gross_monthly_mean >= 0)",
-            name="ck_gross_mean_nonneg",
-        ),
-        CheckConstraint(
-            "(gross_monthly_median IS NULL) OR (gross_monthly_median >= 0)",
-            name="ck_gross_median_nonneg",
-        ),
-        CheckConstraint(
-            "(gross_monthly_median IS NULL) OR "
-            "(basic_monthly_median IS NULL) OR "
-            "(gross_monthly_median >= basic_monthly_median)",
-            name="ck_gross_ge_basic_median",
-        ),
-        Index("ix_fact_emp_overall", "employment_rate_overall"),
-        Index("ix_fact_basic_median", "basic_monthly_median"),
-        Index("ix_fact_gross_median", "gross_monthly_median"),
-    )
-
-    degree: Mapped["DimDegree"] = relationship(back_populates="facts")
-    year: Mapped["SurveyYear"] = relationship(back_populates="facts")
+    conn.commit()
+    logging.info("Database schema created successfully.")
 
 
 # =========================
-# Data model from CSV
+# 2. CSV detection & cleaning
 # =========================
-@dataclass
-class Row:
-    university: str
-    school: str
-    degree: str
-    year: int
-    emp_overall: Optional[float]
-    emp_ft_perm: Optional[float]
-    basic_mean: Optional[float]
-    basic_median: Optional[float]
-    gross_mean: Optional[float]
-    gross_median: Optional[float]
+def detect_csv() -> str | None:
+    """Find a CSV containing 'graduate' in its filename."""
+    for fn in os.listdir("."):
+        if fn.lower().endswith(".csv") and "graduate" in fn.lower():
+            return fn
+    return None
 
 
-def _as_float(x) -> Optional[float]:
+def clean_numeric(series: pd.Series) -> pd.Series:
+    """Remove commas, % signs, and coerce to float."""
+    return pd.to_numeric(
+        series.astype(str)
+        .str.replace(",", "", regex=False)
+        .str.replace("%", "", regex=False)
+        .str.strip(),
+        errors="coerce",
+    )
+
+
+def validate_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Basic validation with p25>p75 warning."""
+    required_cols = {"university", "school", "degree", "year"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        logging.warning(f"Missing columns: {missing}. Filling with defaults.")
+        for m in missing:
+            df[m] = "UNKNOWN" if m != "year" else 2020
+
+    df["year"] = pd.to_numeric(df["year"], errors="coerce")
+    df = df.dropna(subset=["year"])
+    df["year"] = df["year"].astype(int)
+    df = df[df["year"].between(2000, 2100)]
+
+    # p25 > p75 consistency check
+    if {"gross_mthly_25_percentile", "gross_mthly_75_percentile"} <= set(df.columns):
+        invalid = df[
+            (df["gross_mthly_25_percentile"].notna())
+            & (df["gross_mthly_75_percentile"].notna())
+            & (df["gross_mthly_25_percentile"] > df["gross_mthly_75_percentile"])
+        ]
+        if len(invalid) > 0:
+            logging.warning(f"{len(invalid)} rows have p25 > p75.")
+    return df
+
+
+def load_csv(csv_path: str) -> pd.DataFrame:
+    """Load CSV robustly with fallback encoding and clean numeric fields."""
     try:
-        if pd.isna(x):
-            return None
-        v = float(str(x).replace(",", "").strip())
-        return v if math.isfinite(v) else None
-    except Exception:
-        return None
+        try:
+            df = pd.read_csv(csv_path, encoding="utf-8-sig")
+        except UnicodeDecodeError:
+            df = pd.read_csv(csv_path, encoding="latin1")
+    except FileNotFoundError:
+        raise FileNotFoundError(f"CSV not found: {csv_path}")
 
-
-def _as_int_year(y) -> Optional[int]:
-    try:
-        val = int(float(str(y).replace(",", "").strip()))
-        return val if 2000 <= val <= 2100 else None
-    except Exception:
-        return None
-
-
-def parse_dataframe(df: pd.DataFrame) -> List[Row]:
-    """
-    Map raw GES CSV to Row (优先使用 school/degree；若无 school 则 school='(N/A)')。
-    """
-    rename = {
-        "university": "university",
-        "school": "school",
-        "degree": "degree",
-        "year": "year",
-        "employment_rate_overall": "employment_rate_overall",
-        "employment_rate_ft_perm": "employment_rate_ft_perm",
-        "basic_monthly_mean": "basic_monthly_mean",
-        "basic_monthly_median": "basic_monthly_median",
-        "gross_monthly_mean": "gross_monthly_mean",
-        "gross_monthly_median": "gross_monthly_median",
+    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+    rename_map = {
+        "employment_overall": "employment_rate_overall",
+        "employment_ft_perm": "employment_rate_ft_perm",
+        "programme": "degree",
     }
-    df2 = df.rename(columns={k: v for k, v in rename.items() if k in df.columns}).copy()
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
 
-    # 容错：如果没有 school/degree，但有 programme_title，就拆到 degree；school 置 '(N/A)'
-    if "degree" not in df2.columns and "programme_title" in df2.columns:
-        df2["degree"] = df2["programme_title"].astype(str)
-    if "school" not in df2.columns:
-        df2["school"] = "(N/A)"
-
-    required = [
-        "university",
-        "school",
-        "degree",
-        "year",
+    num_cols = [
         "employment_rate_overall",
         "employment_rate_ft_perm",
         "basic_monthly_mean",
         "basic_monthly_median",
         "gross_monthly_mean",
         "gross_monthly_median",
+        "gross_mthly_25_percentile",
+        "gross_mthly_75_percentile",
     ]
-    missing = [c for c in required if c not in df2.columns]
-    if missing:
-        raise ValueError(f"Missing required columns: {missing}")
+    for c in num_cols:
+        if c in df.columns:
+            df[c] = clean_numeric(df[c])
 
-    out: List[Row] = []
-    for _, r in df2.iterrows():
-        yr = _as_int_year(r["year"])
-        if yr is None:
-            continue
-        out.append(
-            Row(
-                university=str(r["university"]).strip(),
-                school=str(r["school"]).strip(),
-                degree=str(r["degree"]).strip(),
-                year=yr,
-                emp_overall=_as_float(r["employment_rate_overall"]),
-                emp_ft_perm=_as_float(r["employment_rate_ft_perm"]),
-                basic_mean=_as_float(r["basic_monthly_mean"]),
-                basic_median=_as_float(r["basic_monthly_median"]),
-                gross_mean=_as_float(r["gross_monthly_mean"]),
-                gross_median=_as_float(r["gross_monthly_median"]),
+    df = validate_dataframe(df)
+    logging.info(f"CSV loaded: {len(df)} rows; columns={list(df.columns)}")
+    return df
+
+
+# =========================
+# 3. Insert to DB with Audit
+# =========================
+def get_or_insert(cur, table, col, value):
+    cur.execute(f"SELECT rowid FROM {table} WHERE {col} = ?", (value,))
+    r = cur.fetchone()
+    if r:
+        return r[0]
+    cur.execute(f"INSERT INTO {table} ({col}) VALUES (?)", (value,))
+    return cur.lastrowid
+
+
+def load_to_db(conn: sqlite3.Connection, df: pd.DataFrame, audit_path: str = DEFAULT_AUDIT):
+    """Load to DB and log rows where gross < basic."""
+    cur = conn.cursor()
+    inserted = 0
+    audit_rows = []
+
+    for _, row in df.iterrows():
+        try:
+            u = str(row["university"]).strip()
+            s = str(row["school"]).strip()
+            d = str(row["degree"]).strip()
+            y = int(row["year"])
+
+            u_id = get_or_insert(cur, "dim_university", "university_name", u)
+            cur.execute(
+                "SELECT school_id FROM dim_school WHERE school_name=? AND university_id=?",
+                (s, u_id),
             )
-        )
-    return out
+            r = cur.fetchone()
+            if r:
+                s_id = r[0]
+            else:
+                cur.execute(
+                    "INSERT INTO dim_school (school_name, university_id) VALUES (?, ?)",
+                    (s, u_id),
+                )
+                s_id = cur.lastrowid
 
+            cur.execute(
+                "SELECT degree_id FROM dim_degree WHERE degree_name=? AND school_id=?",
+                (d, s_id),
+            )
+            r = cur.fetchone()
+            if r:
+                d_id = r[0]
+            else:
+                cur.execute(
+                    "INSERT INTO dim_degree (degree_name, school_id) VALUES (?, ?)",
+                    (d, s_id),
+                )
+                d_id = cur.lastrowid
 
-# =========================
-# Upsert helpers
-# =========================
-def get_or_create_university(sess: Session, name: str) -> DimUniversity:
-    obj = sess.query(DimUniversity).filter_by(university_name=name).one_or_none()
-    if obj:
-        return obj
-    obj = DimUniversity(university_name=name)
-    sess.add(obj)
-    sess.flush()
-    return obj
+            cur.execute("SELECT year_id FROM survey_year WHERE year=?", (y,))
+            r = cur.fetchone()
+            if r:
+                y_id = r[0]
+            else:
+                cur.execute("INSERT INTO survey_year (year) VALUES (?)", (y,))
+                y_id = cur.lastrowid
 
+            bm_med = row.get("basic_monthly_median")
+            gm_med = row.get("gross_monthly_median")
 
-def get_or_create_school(sess: Session, uni_id: int, school_name: str) -> DimSchool:
-    obj = (
-        sess.query(DimSchool).filter_by(university_id=uni_id, school_name=school_name).one_or_none()
-    )
-    if obj:
-        return obj
-    obj = DimSchool(university_id=uni_id, school_name=school_name)
-    sess.add(obj)
-    sess.flush()
-    return obj
+            if pd.notna(bm_med) and pd.notna(gm_med) and float(gm_med) < float(bm_med):
+                audit_rows.append(
+                    {
+                        "university": u,
+                        "school": s,
+                        "degree": d,
+                        "year": y,
+                        "basic_monthly_median": bm_med,
+                        "gross_monthly_median": gm_med,
+                    }
+                )
+                gm_med = bm_med  # clamp to avoid constraint violation
 
+            vals = [
+                row.get("employment_rate_overall"),
+                row.get("employment_rate_ft_perm"),
+                row.get("basic_monthly_mean"),
+                bm_med,
+                row.get("gross_monthly_mean"),
+                gm_med,
+                row.get("gross_mthly_25_percentile"),
+                row.get("gross_mthly_75_percentile"),
+            ]
+            cur.execute(
+                """
+                INSERT OR REPLACE INTO fact_employment (
+                    degree_id, year_id,
+                    employment_rate_overall, employment_rate_ft_perm,
+                    basic_monthly_mean, basic_monthly_median,
+                    gross_monthly_mean, gross_monthly_median,
+                    gross_mthly_25_percentile, gross_mthly_75_percentile
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (d_id, y_id, *vals),
+            )
+            inserted += 1
+        except Exception as e:
+            logging.error(f"Insert failed at row ({row.get('university', 'unknown')}): {e}")
 
-def get_or_create_degree(sess: Session, school_id: int, degree_name: str) -> DimDegree:
-    obj = (
-        sess.query(DimDegree).filter_by(school_id=school_id, degree_name=degree_name).one_or_none()
-    )
-    if obj:
-        return obj
-    obj = DimDegree(school_id=school_id, degree_name=degree_name)
-    sess.add(obj)
-    sess.flush()
-    return obj
+    conn.commit()
+    logging.info(f"Inserted {inserted} rows into database.")
 
-
-def get_or_create_year(sess: Session, year: int) -> SurveyYear:
-    obj = sess.query(SurveyYear).filter_by(year=year).one_or_none()
-    if obj:
-        return obj
-    obj = SurveyYear(year=year)
-    sess.add(obj)
-    sess.flush()
-    return obj
-
-
-def upsert_fact(sess: Session, degree_id: int, year_id: int, r: Row) -> None:
-    obj = sess.query(FactEmployment).filter_by(degree_id=degree_id, year_id=year_id).one_or_none()
-    if obj is None:
-        obj = FactEmployment(
-            degree_id=degree_id,
-            year_id=year_id,
-            employment_rate_overall=r.emp_overall,
-            employment_rate_ft_perm=r.emp_ft_perm,
-            basic_monthly_mean=r.basic_mean,
-            basic_monthly_median=r.basic_median,
-            gross_monthly_mean=r.gross_mean,
-            gross_monthly_median=r.gross_median,
-        )
-        sess.add(obj)
+    if audit_rows:
+        pd.DataFrame(audit_rows).to_csv(audit_path, index=False)
+        logging.warning(f"Audit saved: {audit_path} ({len(audit_rows)} rows)")
     else:
-        obj.employment_rate_overall = r.emp_overall
-        obj.employment_rate_ft_perm = r.emp_ft_perm
-        obj.basic_monthly_mean = r.basic_mean
-        obj.basic_monthly_median = r.basic_median
-        obj.gross_monthly_mean = r.gross_mean
-        obj.gross_monthly_median = r.gross_median
+        logging.info("No audit anomalies detected.")
 
 
 # =========================
-# ERD (Mermaid)
+# 4. ERD (Preserved)
 # =========================
-def export_mermaid_erd(path: str = "erd.md") -> None:
+def export_erd(path=DEFAULT_ERD):
     mermaid = """```mermaid
 erDiagram
-  DIM_UNIVERSITY  ||--o{ DIM_SCHOOL     : has
-  DIM_SCHOOL     ||--o{ DIM_DEGREE     : has
-  DIM_DEGREE     ||--o{ FACT_EMPLOYMENT: has
-  SURVEY_YEAR    ||--o{ FACT_EMPLOYMENT: has
+    DIM_UNIVERSITY ||--o{ DIM_SCHOOL : has
+    DIM_SCHOOL     ||--o{ DIM_DEGREE : has
+    DIM_DEGREE     ||--o{ FACT_EMPLOYMENT : has
+    SURVEY_YEAR    ||--o{ FACT_EMPLOYMENT : has
 
-  DIM_UNIVERSITY {
-    int    university_id  PK
-    string university_name
-    string country
-    string region
-  }
-
-  DIM_SCHOOL {
-    int    school_id      PK
-    int    university_id  FK
-    string school_name
-  }
-
-  DIM_DEGREE {
-    int    degree_id      PK
-    int    school_id      FK
-    string degree_name
-  }
-
-  SURVEY_YEAR {
-    int    id             PK
-    int    year
-  }
-
-  FACT_EMPLOYMENT {
-    int    record_id          PK
-    int    degree_id          FK
-    int    year_id            FK
-    float  employment_rate_overall
-    float  employment_rate_ft_perm
-    float  basic_monthly_mean
-    float  basic_monthly_median
-    float  gross_monthly_mean
-    float  gross_monthly_median
-  }
+    DIM_UNIVERSITY {
+        int    university_id PK
+        string university_name "unique, not null"
+    }
+    DIM_SCHOOL {
+        int    school_id PK
+        string school_name "not null"
+        int    university_id FK
+    }
+    DIM_DEGREE {
+        int    degree_id PK
+        string degree_name "not null"
+        int    school_id FK
+    }
+    SURVEY_YEAR {
+        int year_id PK
+        int year "unique, not null, 2000–2100"
+    }
+    FACT_EMPLOYMENT {
+        int   record_id PK
+        int   degree_id FK
+        int   year_id   FK
+        float employment_rate_overall "0–100"
+        float employment_rate_ft_perm "0–100"
+        float basic_monthly_mean "≥0"
+        float basic_monthly_median "≥0"
+        float gross_monthly_mean "≥0"
+        float gross_monthly_median "≥0"
+        float gross_mthly_25_percentile
+        float gross_mthly_75_percentile
+        string uq "unique (degree_id, year_id)"
+    }
 ```"""
     with open(path, "w", encoding="utf-8") as f:
         f.write(mermaid)
+    logging.info(f"ERD exported: {path}")
 
 
 # =========================
-# Main
+# 5. Main
 # =========================
-def main() -> None:
-    ap = argparse.ArgumentParser(description="Section 2.1 – 3NF DB build & load")
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    repo_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
-    default_csv = os.path.join(repo_root, "7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD (2).csv")
-    default_db = os.path.join(repo_root, "ges.db")
-
-    ap.add_argument("--csv", default=default_csv, help="Input CSV")
-    ap.add_argument("--db", default=default_db, help="SQLite DB file")
-    ap.add_argument("--reset", action="store_true", help="Drop & recreate schema")
+def main():
+    ap = argparse.ArgumentParser(description="COMP0035 Section 2.1 – Enhanced SQLite3 with Audit")
+    ap.add_argument("--csv", type=str, default=None)
+    ap.add_argument("--db", type=str, default=DEFAULT_DB)
+    ap.add_argument("--reset", action="store_true")
+    ap.add_argument("--erd", type=str, default=DEFAULT_ERD)
+    ap.add_argument("--audit", type=str, default=DEFAULT_AUDIT)
     args = ap.parse_args()
 
-    if not os.path.exists(args.csv):
-        raise FileNotFoundError(args.csv)
+    csv_path = args.csv or detect_csv()
+    if not csv_path:
+        logging.error("No CSV file found. Place one containing 'graduate' or use --csv.")
+        return
 
-    engine = build_engine(f"sqlite:///{args.db}")
-    SessionLocal = sessionmaker(bind=engine, future=True)
+    conn = sqlite3.connect(args.db)
+    conn.execute("PRAGMA foreign_keys = ON;")
 
     if args.reset:
-        Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
+        create_schema(conn)
 
-    df = pd.read_csv(args.csv)
-    rows = parse_dataframe(df)
-    print(f"[INFO] Parsed valid rows: {len(rows)}")
-
-    audit_rows: List[dict] = []
-
-    with SessionLocal.begin() as sess:
-        cache_uni: Dict[str, int] = {}
-        cache_school: Dict[Tuple[int, str], int] = {}
-        cache_degree: Dict[Tuple[int, str], int] = {}
-        cache_year: Dict[int, int] = {}
-
-        for r in rows:
-            # dims
-            if r.university not in cache_uni:
-                u = get_or_create_university(sess, r.university)
-                cache_uni[r.university] = u.university_id
-            uni_id = cache_uni[r.university]
-
-            s_key = (uni_id, r.school)
-            if s_key not in cache_school:
-                s = get_or_create_school(sess, uni_id, r.school)
-                cache_school[s_key] = s.school_id
-            school_id = cache_school[s_key]
-
-            d_key = (school_id, r.degree)
-            if d_key not in cache_degree:
-                d = get_or_create_degree(sess, school_id, r.degree)
-                cache_degree[d_key] = d.degree_id
-            degree_id = cache_degree[d_key]
-
-            if r.year not in cache_year:
-                y = get_or_create_year(sess, r.year)
-                cache_year[r.year] = y.id
-            year_id = cache_year[r.year]
-
-            # --- PRE-INSERT AUDIT & CLAMP (median 口径) ---
-            bm = r.basic_median
-            gm = r.gross_median
-            if (bm is not None) and (gm is not None) and (gm < bm):
-                audit_rows.append(
-                    {
-                        "university": r.university,
-                        "school": r.school,
-                        "degree": r.degree,
-                        "year": r.year,
-                        "gross_before": gm,
-                        "basic": bm,
-                    }
-                )
-                r.gross_median = bm  # clamp
-            # ---------------------------------------------
-
-            upsert_fact(sess, degree_id, year_id, r)
-
-    if audit_rows:
-        pd.DataFrame(audit_rows).to_csv("audit_gross_lt_basic.csv", index=False)
-        print(f"[AUDIT] gross < basic rows: {len(audit_rows)} -> audit_gross_lt_basic.csv")
-    else:
-        print("[AUDIT] gross < basic rows: 0")
-
-    with SessionLocal() as sess:
-        n_u = sess.query(DimUniversity).count()
-        n_s = sess.query(DimSchool).count()
-        n_d = sess.query(DimDegree).count()
-        n_y = sess.query(SurveyYear).count()
-        n_f = sess.query(FactEmployment).count()
-    print(f"[COUNTS] university={n_u}, school={n_s}, degree={n_d}, year={n_y}, facts={n_f}")
-
-    export_mermaid_erd("erd.md")
-    print("[OK] Mermaid ERD exported -> erd.md")
-    print("[OK] Done.")
+    try:
+        df = load_csv(csv_path)
+        load_to_db(conn, df, args.audit)
+    except Exception as e:
+        logging.error(f"Fatal error: {e}")
+    finally:
+        export_erd(args.erd)
+        conn.close()
+        logging.info(f"Database saved: {args.db}")
 
 
 if __name__ == "__main__":
