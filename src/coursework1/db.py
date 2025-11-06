@@ -184,7 +184,9 @@ def get_or_insert(cur, table, col, value):
     return cur.lastrowid
 
 
-def load_to_db(conn: sqlite3.Connection, df: pd.DataFrame, audit_path: str = DEFAULT_AUDIT):
+def load_to_db(
+    conn: sqlite3.Connection, df: pd.DataFrame, audit_path: str = DEFAULT_AUDIT
+):
     """Load to DB and log rows where gross < basic."""
     cur = conn.cursor()
     inserted = 0
@@ -274,7 +276,9 @@ def load_to_db(conn: sqlite3.Connection, df: pd.DataFrame, audit_path: str = DEF
             )
             inserted += 1
         except Exception as e:
-            logging.error(f"Insert failed at row ({row.get('university', 'unknown')}): {e}")
+            logging.error(
+                f"Insert failed at row ({row.get('university', 'unknown')}): {e}"
+            )
 
     conn.commit()
     logging.info(f"Inserted {inserted} rows into database.")
@@ -339,7 +343,9 @@ erDiagram
 # 5. Main
 # =========================
 def main():
-    ap = argparse.ArgumentParser(description="COMP0035 Section 2.1 – Enhanced SQLite3 with Audit")
+    ap = argparse.ArgumentParser(
+        description="COMP0035 Section 2.1 – Enhanced SQLite3 with Audit"
+    )
     ap.add_argument("--csv", type=str, default=None)
     ap.add_argument("--db", type=str, default=DEFAULT_DB)
     ap.add_argument("--reset", action="store_true")
@@ -349,7 +355,9 @@ def main():
 
     csv_path = args.csv or detect_csv()
     if not csv_path:
-        logging.error("No CSV file found. Place one containing 'graduate' or use --csv.")
+        logging.error(
+            "No CSV file found. Place one containing 'graduate' or use --csv."
+        )
         return
 
     conn = sqlite3.connect(args.db)

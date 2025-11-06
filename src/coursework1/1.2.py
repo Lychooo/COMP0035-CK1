@@ -48,9 +48,15 @@ def clean_base(df: pd.DataFrame) -> pd.DataFrame:
 
     # Remove impossible percentages and negative salaries (data quality from 1.1)
     if "employment_rate_overall" in out.columns:
-        out = out[(out["employment_rate_overall"] >= 0) & (out["employment_rate_overall"] <= 100)]
+        out = out[
+            (out["employment_rate_overall"] >= 0)
+            & (out["employment_rate_overall"] <= 100)
+        ]
     if "employment_rate_ft_perm" in out.columns:
-        out = out[(out["employment_rate_ft_perm"] >= 0) & (out["employment_rate_ft_perm"] <= 100)]
+        out = out[
+            (out["employment_rate_ft_perm"] >= 0)
+            & (out["employment_rate_ft_perm"] <= 100)
+        ]
 
     for sc in [
         "basic_monthly_mean",
@@ -107,7 +113,9 @@ def q1_plot(grp: pd.DataFrame, ly: int) -> None:
     """Vertical bars with improved label alignment and readability."""
     # Salary bar
     if "gross_monthly_median" in grp.columns:
-        ax = grp.sort_values("gross_monthly_median", ascending=False)["gross_monthly_median"].plot(
+        ax = grp.sort_values("gross_monthly_median", ascending=False)[
+            "gross_monthly_median"
+        ].plot(
             kind="bar",
             figsize=(12, 6),
             title=f"Median Gross Monthly Salary by University (Latest year {ly})",
@@ -161,7 +169,11 @@ def q2_prepare(df: pd.DataFrame) -> pd.DataFrame:
     ensure_not_empty(d, "Q2 raw")
 
     # group median for stability
-    g = d.groupby(["year", "university"])["gross_monthly_median"].median().unstack("university")
+    g = (
+        d.groupby(["year", "university"])["gross_monthly_median"]
+        .median()
+        .unstack("university")
+    )
     g = g.sort_index()  # sort by year
     save_table(g, "q2_trend_table_year_univ_salary_median")
     return g
