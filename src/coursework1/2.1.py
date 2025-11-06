@@ -1,16 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-COMP0035 – Coursework Section 2.1 (Enhanced Final Version with Audit)
----------------------------------------------------------------------
-Features:
-1. Reusability (modular, auto CSV detection)
-2. Error handling (try/except + logging)
-3. Data validation & cleaning (%, commas, invalid years, p25>p75)
-4. Audit: if gross_monthly_median < basic_monthly_median → record to CSV + clamp
-5. Original ERD fully preserved
-"""
-
 import os
 import sqlite3
 import pandas as pd
