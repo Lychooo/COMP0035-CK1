@@ -4,19 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "comp0035-cw1"
-version = "0.1.1"
-description = "COMP0035 Coursework 1 scripts: EDA, preparation, SQLite database"
+version = "0.1.2"
+description = "COMP0035 Coursework 1 scripts"
 readme = "README.md"
 requires-python = ">=3.10"
-
-# Only libraries actually imported by the code:
 dependencies = [
   "pandas>=2.2,<3.0",
   "matplotlib>=3.8,<4.0",
   "tabulate>=0.9"
 ]
 
-# Notes:
-# - sqlite3, argparse, logging are from the Python standard library and do not belong here.
-# - No packaging of modules or entry points is required for these scripts.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
+exclude = [".venv", "build", "dist", ".git"]
+
 
