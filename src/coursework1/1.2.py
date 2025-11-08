@@ -41,6 +41,7 @@ def clean_base(df: pd.DataFrame) -> pd.DataFrame:
     ]
     for c in num_cols:
         if c in out.columns:
+            out[c] = out[c].astype(str).str.replace("%", "", regex=False)
             out[c] = to_num(out[c])
 
     # Drop exact duplicates
@@ -86,13 +87,25 @@ def ensure_not_empty(df: pd.DataFrame, label: str) -> None:
 
 # ============== Q1: Latest year, university ranking (bar plots) ==============
 def q1_prepare(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
-    """Prepare latest-year median by university for salary and employment rate."""
-    ly = latest_year(df)
-    if ly is None:
-        raise ValueError("No valid 'year' column found.")
+    # Count how many unique universities appear in each year
+    year_counts = df.groupby("year")["university"].nunique()
+    print("University coverage by year:")
+    print(year_counts.sort_index())
+
+    # Identify the most recent year with all 6 universities
+    full_years = year_counts[year_counts >= 6].index
+    if len(full_years) > 0:
+        ly = int(full_years.max())
+        print(f"✅ Using {ly} for Q1 (latest year with full university coverage).")
+    else:
+        # Fallback: choose the year with the maximum available universities
+        ly = int(year_counts.idxmax())
+        print(f"⚠️ Using {ly} for Q1 (year with maximum available universities).")
+
+    # Filter the dataset for the selected year
     dfy = df[df["year"] == ly].copy()
 
-    # Keep only relevant cols
+    # Keep only the relevant columns
     need_cols = ["university", "gross_monthly_median", "employment_rate_overall"]
     keep = [c for c in need_cols if c in dfy.columns]
     dfy = dfy[keep].dropna()
@@ -100,7 +113,7 @@ def q1_prepare(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     # Aggregate by university (median = robust to outliers)
     grp = dfy.groupby("university").median(numeric_only=True)
 
-    # Save table
+    # Save the result table
     save_table(
         grp.sort_values("gross_monthly_median", ascending=False),
         f"q1_latest_{ly}_by_university_median",
@@ -118,7 +131,7 @@ def q1_plot(grp: pd.DataFrame, ly: int) -> None:
         ].plot(
             kind="bar",
             figsize=(12, 6),
-            title=f"Median Gross Monthly Salary by University (Latest year {ly})",
+            title=f"Median Gross Monthly Salary by University (year {ly})",
             rot=0,
         )
         # right-align, rotate labels slightly to match bars
@@ -142,7 +155,7 @@ def q1_plot(grp: pd.DataFrame, ly: int) -> None:
         ].plot(
             kind="bar",
             figsize=(12, 6),
-            title=f"Median Employment Rate by University (Latest year {ly})",
+            title=f"Median Employment Rate by University (year {ly})",
             rot=0,
         )
         ax.set_xticklabels(ax.get_xticklabels(), rotation=30, ha="right")
@@ -195,14 +208,26 @@ def q2_plot(trend_df: pd.DataFrame) -> None:
 
 # ============== Q3: Relationship between employment rate and salary (scatter) ==============
 def q3_prepare(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
-    """Latest-year per-record data (course granularity) for scatter plot."""
-    ly = latest_year(df)
+    # Force use of 2022 for consistent comparison across all universities
+    ly = 2022
+    print(f"⚙️ Using {ly} for Q3 (consistent with Q1 full coverage year).")
+
+    # Filter records for that year
     d = df[df["year"] == ly].copy()
+
+    # Keep only required numeric columns
     need = ["employment_rate_overall", "gross_monthly_median"]
     ok = [c for c in need if c in d.columns]
     d = d[ok].dropna()
-    ensure_not_empty(d, "Q3 latest-year scatter")
-    save_table(d.describe().transpose(), f"q3_latest_{ly}_scatter_numeric_describe")
+
+    ensure_not_empty(d, f"Q3 {ly} scatter dataset")
+
+    # Save summary statistics
+    save_table(
+        d.describe().transpose(),
+        f"q3_latest_{ly}_scatter_numeric_describe",
+    )
+
     return d, ly
 
 
@@ -211,7 +236,7 @@ def q3_plot(scatter_df: pd.DataFrame, ly: int) -> None:
         kind="scatter",
         x="employment_rate_overall",
         y="gross_monthly_median",
-        title=f"Employment Rate vs Gross Monthly Median (Latest year {ly})",
+        title=f"Employment Rate vs Gross Monthly Median (year {ly})",
     )
     ax.set_xlabel("Employment rate (%)")
     ax.set_ylabel("Gross monthly median (SGD)")
@@ -230,6 +255,7 @@ def main() -> None:
 
     try:
         df = pd.read_csv(file_path, encoding="utf-8-sig")
+        print(df["year"].unique())
     except UnicodeDecodeError:
         df = pd.read_csv(file_path)
 
