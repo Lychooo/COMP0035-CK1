@@ -4,11 +4,36 @@ This repository provides three Python scripts to (i) explore a CSV dataset, (ii)
 It documents only what the code actually uses.
 
 ## Repository Layout
-```
-src/coursework1/
-├─ 1.1.py   # Data description & exploration (EDA)
-├─ 1.2.py   # Data preparation
-└─ db.py    # SQLite database creation (3NF schema + audit)
+```bash
+COMP0035-CW-LYCHOOO/
+│
+├─ .github/                     # (Optional) Workflow or CI configurations
+├─ .ruff_cache/                 # Ruff linter cache
+├─ .venv/                       # Local virtual environment (excluded from version control)
+│
+├─ eda_output/                  # Output folder for EDA figures and summary tables (Section 1.1)
+├─ prep_output/                 # Output folder for data preparation and visualisations (Section 1.2)
+│
+├─ src/
+│   ├─ coursework1/             # Section 1–2 implementation scripts
+│   │   ├─ 1.1.py               # Data description & exploration (EDA)
+│   │   ├─ 1.2.py               # Data preparation and visualisation
+│   │   ├─ db.py                # SQLite database creation, 3NF schema & audit
+│   │   └─ __init__.py          # (Optional) package marker, can be safely removed
+│   │
+│   └─ coursework2/             # Placeholder for Section 3–4 (future work)
+│
+├─ .flake8                      # Flake8 linting configuration
+├─ .gitignore                   # Files/folders excluded from Git version control
+│
+├─ 7-GraduateEmploymentSurveyNTUNUSSITSMUSUSSSUTD.csv   # Raw dataset input
+├─ audit_gross_lt_basic.csv     # Audit log: rows where gross < basic (auto-generated)
+├─ erd.md                       # ERD (Entity Relationship Diagram) in Mermaid format
+├─ ges_2_1.db                   # SQLite database created by db.py
+│
+├─ pyproject.toml               # Project metadata, dependencies, and build configuration
+├─ requirements.txt             # Runtime & development dependencies
+└─ README.md                    # Project documentation (setup, usage, outputs)
 ```
 
 ## Environment Setup
