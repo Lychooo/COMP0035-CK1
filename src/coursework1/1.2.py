@@ -96,11 +96,11 @@ def q1_prepare(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     full_years = year_counts[year_counts >= 6].index
     if len(full_years) > 0:
         ly = int(full_years.max())
-        print(f"✅ Using {ly} for Q1 (latest year with full university coverage).")
+        print(f"Using {ly} for Q1 (latest year with full university coverage).")
     else:
         # Fallback: choose the year with the maximum available universities
         ly = int(year_counts.idxmax())
-        print(f"⚠️ Using {ly} for Q1 (year with maximum available universities).")
+        print(f"Using {ly} for Q1 (year with maximum available universities).")
 
     # Filter the dataset for the selected year
     dfy = df[df["year"] == ly].copy()
@@ -210,7 +210,7 @@ def q2_plot(trend_df: pd.DataFrame) -> None:
 def q3_prepare(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     # Force use of 2022 for consistent comparison across all universities
     ly = 2022
-    print(f"⚙️ Using {ly} for Q3 (consistent with Q1 full coverage year).")
+    print(f"Using {ly} for Q3 (consistent with Q1 full coverage year).")
 
     # Filter records for that year
     d = df[df["year"] == ly].copy()
@@ -275,7 +275,7 @@ def main() -> None:
     scat, ly2 = q3_prepare(dfc)
     q3_plot(scat, ly2)
 
-    print("✅Section 1.2 Data preparation finished.")
+    print("Section 1.2 Data preparation finished.")
     print(f"   Input : {file_path}")
     print(f"   Output: {OUTPUT_DIR.resolve()}")
     print("   Artifacts: Q1 tables/bars, Q2 trend lines, Q3 scatter + describe")

@@ -254,7 +254,7 @@ def main() -> None:
             save_table(vc.to_frame(name="count"), f"07_top10_freq_{col}")
 
     # Done
-    print("✅ Section 1.1 EDA completed.")
+    print("Section 1.1 EDA completed.")
     print(f"   - Input : {file_path}")
     print(f"   - Output: {OUTPUT_DIR.resolve()}")
     print(
